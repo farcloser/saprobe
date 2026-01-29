@@ -25,22 +25,28 @@ func TestBits(t *testing.T) {
 	b2 := byte(170) // 10101010
 	b3 := byte(204) // 11001100
 	b4 := byte(51)  // 00110011
+
 	b := bits.New([]byte{b1, b2, b3, b4})
 	if b.Bits(1) != 0 {
 		t.Fail()
 	}
+
 	if b.Bits(1) != 1 {
 		t.Fail()
 	}
+
 	if b.Bits(1) != 0 {
 		t.Fail()
 	}
+
 	if b.Bits(1) != 1 {
 		t.Fail()
 	}
+
 	if b.Bits(8) != 90 /* 01011010 */ {
 		t.Fail()
 	}
+
 	if b.Bits(12) != 2764 /* 101011001100 */ {
 		t.Fail()
 	}

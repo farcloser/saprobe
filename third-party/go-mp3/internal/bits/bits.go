@@ -14,42 +14,51 @@
 
 package bits
 
+// Bits is a bit-level reader over a byte slice.
 type Bits struct {
 	vec     []byte
 	bitPos  int
 	bytePos int
 }
 
+// New creates a new Bits reader from a byte slice.
 func New(vec []byte) *Bits {
 	return &Bits{
 		vec: vec,
 	}
 }
 
+// Append creates a new Bits reader by appending buf to the existing bits data.
 func Append(bits *Bits, buf []byte) *Bits {
 	return New(append(bits.vec, buf...))
 }
 
+// Bit reads and returns a single bit from the stream.
 func (b *Bits) Bit() int {
 	if len(b.vec) <= b.bytePos {
 		// TODO: Should this return error?
 		return 0
 	}
+
 	tmp := uint(b.vec[b.bytePos]) >> (7 - uint(b.bitPos))
 	tmp &= 0x01
 	b.bytePos += (b.bitPos + 1) >> 3
 	b.bitPos = (b.bitPos + 1) & 0x07
+
 	return int(tmp)
 }
 
+// Bits reads and returns num bits from the stream as an int.
 func (b *Bits) Bits(num int) int {
 	if num == 0 {
 		return 0
 	}
+
 	if len(b.vec) <= b.bytePos {
 		// TODO: Should this return error?
 		return 0
 	}
+
 	bb := make([]byte, 4)
 	copy(bb, b.vec[b.bytePos:])
 	tmp := (uint32(bb[0]) << 24) | (uint32(bb[1]) << 16) | (uint32(bb[2]) << 8) | (uint32(bb[3]))
@@ -57,22 +66,27 @@ func (b *Bits) Bits(num int) int {
 	tmp >>= (32 - uint(num))
 	b.bytePos += (b.bitPos + num) >> 3
 	b.bitPos = (b.bitPos + num) & 0x07
+
 	return int(tmp)
 }
 
+// BitPos returns the current bit position in the stream.
 func (b *Bits) BitPos() int {
 	return b.bytePos<<3 + b.bitPos
 }
 
+// SetPos sets the current bit position in the stream.
 func (b *Bits) SetPos(pos int) {
 	b.bytePos = pos >> 3
 	b.bitPos = pos & 0x7
 }
 
+// LenInBytes returns the total length of the underlying byte slice.
 func (b *Bits) LenInBytes() int {
 	return len(b.vec)
 }
 
+// Tail returns the last offset bytes from the underlying byte slice.
 func (b *Bits) Tail(offset int) []byte {
 	return b.vec[len(b.vec)-offset:]
 }

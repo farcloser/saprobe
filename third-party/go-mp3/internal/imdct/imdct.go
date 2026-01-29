@@ -21,36 +21,46 @@ import (
 var imdctWinData = [4][36]float32{}
 
 func init() {
-	for i := 0; i < 36; i++ {
+	for i := range 36 {
 		imdctWinData[0][i] = float32(math.Sin(math.Pi / 36 * (float64(i) + 0.5)))
 	}
-	for i := 0; i < 18; i++ {
+
+	for i := range 18 {
 		imdctWinData[1][i] = float32(math.Sin(math.Pi / 36 * (float64(i) + 0.5)))
 	}
+
 	for i := 18; i < 24; i++ {
 		imdctWinData[1][i] = 1.0
 	}
+
 	for i := 24; i < 30; i++ {
 		imdctWinData[1][i] = float32(math.Sin(math.Pi / 12 * (float64(i) + 0.5 - 18.0)))
 	}
+
 	for i := 30; i < 36; i++ {
 		imdctWinData[1][i] = 0.0
 	}
-	for i := 0; i < 12; i++ {
+
+	for i := range 12 {
 		imdctWinData[2][i] = float32(math.Sin(math.Pi / 12 * (float64(i) + 0.5)))
 	}
+
 	for i := 12; i < 36; i++ {
 		imdctWinData[2][i] = 0.0
 	}
-	for i := 0; i < 6; i++ {
+
+	for i := range 6 {
 		imdctWinData[3][i] = 0.0
 	}
+
 	for i := 6; i < 12; i++ {
 		imdctWinData[3][i] = float32(math.Sin(math.Pi / 12 * (float64(i) + 0.5 - 6.0)))
 	}
+
 	for i := 12; i < 18; i++ {
 		imdctWinData[3][i] = 1.0
 	}
+
 	for i := 18; i < 36; i++ {
 		imdctWinData[3][i] = float32(math.Sin(math.Pi / 36 * (float64(i) + 0.5)))
 	}
@@ -60,8 +70,9 @@ var cosN12 = [6][12]float32{}
 
 func init() {
 	const N = 12
-	for i := 0; i < 6; i++ {
-		for j := 0; j < 12; j++ {
+
+	for i := range 6 {
+		for j := range 12 {
 			cosN12[i][j] = float32(math.Cos(math.Pi / (2 * N) * (2*float64(j) + 1 + N/2) * (2*float64(i) + 1)))
 		}
 	}
@@ -71,37 +82,48 @@ var cosN36 = [18][36]float32{}
 
 func init() {
 	const N = 36
-	for i := 0; i < 18; i++ {
-		for j := 0; j < 36; j++ {
+
+	for i := range 18 {
+		for j := range 36 {
 			cosN36[i][j] = float32(math.Cos(math.Pi / (2 * N) * (2*float64(j) + 1 + N/2) * (2*float64(i) + 1)))
 		}
 	}
 }
 
-func Win(in []float32, blockType int) []float32 {
+// Win performs the IMDCT and windowing for one subband of MP3 audio data.
+func Win(input []float32, blockType int) []float32 {
 	out := make([]float32, 36)
+
 	if blockType == 2 {
 		iwd := imdctWinData[blockType]
+
 		const N = 12
-		for i := 0; i < 3; i++ {
-			for p := 0; p < N; p++ {
+		for blockIdx := range 3 {
+			for sampleIdx := range N {
 				sum := float32(0.0)
-				for m := 0; m < N/2; m++ {
-					sum += in[i+3*m] * cosN12[m][p]
+				for m := range N / 2 {
+					sum += input[blockIdx+3*m] * cosN12[m][sampleIdx]
 				}
-				out[6*i+p+6] += sum * iwd[p]
+
+				out[6*blockIdx+sampleIdx+6] += sum * iwd[sampleIdx]
 			}
 		}
+
 		return out
 	}
+
 	const N = 36
+
 	iwd := imdctWinData[blockType]
-	for p := 0; p < N; p++ {
+
+	for sampleIdx := range N {
 		sum := float32(0.0)
-		for m := 0; m < N/2; m++ {
-			sum += in[m] * cosN36[m][p]
+		for m := range N / 2 {
+			sum += input[m] * cosN36[m][sampleIdx]
 		}
-		out[p] = sum * iwd[p]
+
+		out[sampleIdx] = sum * iwd[sampleIdx]
 	}
+
 	return out
 }

@@ -271,7 +271,7 @@ linters:
             - github.com/farcloser/agar
             - github.com/containerd/nerdctl/mod/tigron
             - github.com/urfave/cli/v3
-            - github.com/hajimehoshi/go-mp3
+            - github.com/hajimehoshi/oto/v2
             - github.com/jfreymuth/oggvorbis
             - github.com/abema/go-mp4
             - github.com/mewkiz/flac

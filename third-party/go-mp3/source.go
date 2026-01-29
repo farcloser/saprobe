@@ -30,13 +30,17 @@ func (s *source) Seek(position int64, whence int) (int64, error) {
 	if !ok {
 		return 0, errors.New("mp3: source must be io.Seeker")
 	}
+
 	s.buf = nil
-	n, err := seeker.Seek(position, whence)
+
+	seekPos, err := seeker.Seek(position, whence)
 	if err != nil {
 		return 0, err
 	}
-	s.pos = n
-	return n, nil
+
+	s.pos = seekPos
+
+	return seekPos, nil
 }
 
 func (s *source) skipTags() error {
@@ -44,6 +48,7 @@ func (s *source) skipTags() error {
 	if _, err := s.ReadFull(buf); err != nil {
 		return err
 	}
+
 	switch string(buf) {
 	case "TAG":
 		buf := make([]byte, 125)
@@ -59,15 +64,19 @@ func (s *source) skipTags() error {
 		}
 
 		buf = make([]byte, 4)
+
 		n, err := s.ReadFull(buf)
 		if err != nil {
 			return err
 		}
+
 		if n != 4 {
 			return nil
 		}
+
 		size := (uint32(buf[0]) << 21) | (uint32(buf[1]) << 14) |
 			(uint32(buf[2]) << 7) | uint32(buf[3])
+
 		buf = make([]byte, size)
 		if _, err := s.ReadFull(buf); err != nil {
 			return err
@@ -84,8 +93,10 @@ func (s *source) rewind() error {
 	if _, err := s.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
+
 	s.pos = 0
 	s.buf = nil
+
 	return nil
 }
 
@@ -103,18 +114,21 @@ func (s *source) ReadFull(buf []byte) (int, error) {
 		} else {
 			s.buf = nil
 		}
+
 		if len(buf) == read {
 			return read, nil
 		}
 	}
 
-	n, err := io.ReadFull(s.reader, buf[read:])
+	bytesRead, err := io.ReadFull(s.reader, buf[read:])
 	if err != nil {
 		// Allow if all data can't be read. This is common.
-		if err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
 			err = io.EOF
 		}
 	}
-	s.pos += int64(n)
-	return n + read, err
+
+	s.pos += int64(bytesRead)
+
+	return bytesRead + read, err
 }

@@ -14,20 +14,19 @@
 
 package consts
 
-import (
-	"fmt"
-)
-
+// UnexpectedEOF represents an unexpected end of file during MP3 decoding.
 type UnexpectedEOF struct {
 	At string
 }
 
 func (u *UnexpectedEOF) Error() string {
-	return fmt.Sprintf("mp3: unexpected EOF at %s", u.At)
+	return "mp3: unexpected EOF at " + u.At
 }
 
+// Version represents an MPEG audio version.
 type Version int
 
+// MPEG audio version constants.
 const (
 	Version2_5      Version = 0
 	VersionReserved Version = 1
@@ -35,8 +34,10 @@ const (
 	Version1        Version = 3
 )
 
+// Layer represents an MPEG audio layer.
 type Layer int
 
+// MPEG audio layer constants.
 const (
 	LayerReserved Layer = 0
 	Layer3        Layer = 1
@@ -44,8 +45,10 @@ const (
 	Layer1        Layer = 3
 )
 
+// Mode represents an MPEG audio channel mode.
 type Mode int
 
+// MPEG audio channel mode constants.
 const (
 	ModeStereo        Mode = 0
 	ModeJointStereo   Mode = 1
@@ -53,22 +56,27 @@ const (
 	ModeSingleChannel Mode = 3
 )
 
+// MP3 frame structure constants.
 const (
 	SamplesPerGr  = 576
 	GranulesMpeg1 = 2
 )
 
+// SamplingFrequency represents an MPEG audio sampling frequency index.
 type SamplingFrequency int
 
+// SamplingFrequency constants.
 const (
 	SamplingFrequencyReserved SamplingFrequency = 3
 )
 
+// Scale factor band index type constants.
 const (
 	SfBandIndicesLong  = 0
 	SfBandIndicesShort = 1
 )
 
+// SfBandIndices contains scale factor band boundary indices for all MPEG versions.
 var SfBandIndices = [2][3][2][]int{
 	{ // MPEG 1
 		{ // Layer 3

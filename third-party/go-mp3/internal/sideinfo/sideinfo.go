@@ -15,6 +15,7 @@
 package sideinfo
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frameheader"
 )
 
+// FullReader is an interface for reading complete byte slices.
 type FullReader interface {
 	ReadFull([]byte) (int, error)
 }
@@ -33,7 +35,7 @@ type SideInfo struct {
 	MainDataBegin    int       // 9 bits
 	PrivateBits      int       // 3 bits in mono, 5 in stereo
 	Scfsi            [2][4]int // 1 bit
-	Part2_3Length    [2][2]int // 12 bits
+	Part2And3Length  [2][2]int // 12 bits
 	BigValues        [2][2]int // 9 bits
 	GlobalGain       [2][2]int // 8 bits
 	ScalefacCompress [2][2]int // 4 bits
@@ -62,100 +64,115 @@ var sideInfoBitsToRead = [2][4]int{
 	},
 }
 
+// Read reads and parses the side information from an MP3 frame.
 func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) {
 	nch := header.NumberOfChannels()
+
 	framesize, err := header.FrameSize()
 	if err != nil {
 		return nil, err
 	}
+
 	if framesize > 2000 {
 		return nil, fmt.Errorf("mp3: framesize = %d\n", framesize)
 	}
-	sideinfo_size := header.SideInfoSize()
+
+	sideInfoSize := header.SideInfoSize()
 
 	// Main data size is the rest of the frame,including ancillary data
-	main_data_size := framesize - sideinfo_size - 4 // sync+header
+	mainDataSize := framesize - sideInfoSize - 4 // sync+header
 	// CRC is 2 bytes
 	if header.ProtectionBit() == 0 {
-		main_data_size -= 2
+		mainDataSize -= 2
 	}
 	// Read sideinfo from bitstream into buffer used by Bits()
-	buf := make([]byte, sideinfo_size)
+	buf := make([]byte, sideInfoSize)
+
 	n, err := source.ReadFull(buf)
-	if n < sideinfo_size {
-		if err == io.EOF {
-			return nil, &consts.UnexpectedEOF{"sideinfo.Read"}
+	if n < sideInfoSize {
+		if errors.Is(err, io.EOF) {
+			return nil, &consts.UnexpectedEOF{At: "sideinfo.Read"}
 		}
-		return nil, fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %v", sideinfo_size, err)
+
+		return nil, fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %w", sideInfoSize, err)
 	}
-	s := bits.New(buf)
+
+	bitReader := bits.New(buf)
 
 	mpeg1Frame := header.LowSamplingFrequency() == 0
 	bitsToRead := sideInfoBitsToRead[header.LowSamplingFrequency()]
 
 	// Parse audio data
 	// Pointer to where we should start reading main data
-	si := &SideInfo{}
-	si.MainDataBegin = s.Bits(bitsToRead[0])
+	sideInfo := &SideInfo{}
+	sideInfo.MainDataBegin = bitReader.Bits(bitsToRead[0])
 	// Get private bits. Not used for anything.
 	if header.Mode() == consts.ModeSingleChannel {
-		si.PrivateBits = s.Bits(bitsToRead[1])
+		sideInfo.PrivateBits = bitReader.Bits(bitsToRead[1])
 	} else {
-		si.PrivateBits = s.Bits(bitsToRead[2])
+		sideInfo.PrivateBits = bitReader.Bits(bitsToRead[2])
 	}
 
 	if mpeg1Frame {
 		// Get scale factor selection information
-		for ch := 0; ch < nch; ch++ {
-			for scfsi_band := 0; scfsi_band < 4; scfsi_band++ {
-				si.Scfsi[ch][scfsi_band] = s.Bits(1)
+		for channel := range nch {
+			for scfsiBand := range 4 {
+				sideInfo.Scfsi[channel][scfsiBand] = bitReader.Bits(1)
 			}
 		}
 	}
 	// Get the rest of the side information
 	for gr := 0; gr < header.Granules(); gr++ {
-		for ch := 0; ch < nch; ch++ {
-			si.Part2_3Length[gr][ch] = s.Bits(12)
-			si.BigValues[gr][ch] = s.Bits(9)
-			si.GlobalGain[gr][ch] = s.Bits(8)
-			si.ScalefacCompress[gr][ch] = s.Bits(bitsToRead[3])
-			si.WinSwitchFlag[gr][ch] = s.Bits(1)
-			if si.WinSwitchFlag[gr][ch] == 1 {
-				si.BlockType[gr][ch] = s.Bits(2)
-				si.MixedBlockFlag[gr][ch] = s.Bits(1)
-				for region := 0; region < 2; region++ {
-					si.TableSelect[gr][ch][region] = s.Bits(5)
+		for channel := range nch {
+			sideInfo.Part2And3Length[gr][channel] = bitReader.Bits(12)
+			sideInfo.BigValues[gr][channel] = bitReader.Bits(9)
+			sideInfo.GlobalGain[gr][channel] = bitReader.Bits(8)
+			sideInfo.ScalefacCompress[gr][channel] = bitReader.Bits(bitsToRead[3])
+
+			sideInfo.WinSwitchFlag[gr][channel] = bitReader.Bits(1)
+			if sideInfo.WinSwitchFlag[gr][channel] == 1 {
+				sideInfo.BlockType[gr][channel] = bitReader.Bits(2)
+
+				sideInfo.MixedBlockFlag[gr][channel] = bitReader.Bits(1)
+				for region := range 2 {
+					sideInfo.TableSelect[gr][channel][region] = bitReader.Bits(5)
 				}
-				for window := 0; window < 3; window++ {
-					si.SubblockGain[gr][ch][window] = s.Bits(3)
+
+				for window := range 3 {
+					sideInfo.SubblockGain[gr][channel][window] = bitReader.Bits(3)
 				}
 
 				// TODO: This is not listed on the spec. Is this correct??
-				if si.BlockType[gr][ch] == 2 && si.MixedBlockFlag[gr][ch] == 0 {
-					si.Region0Count[gr][ch] = 8 // Implicit
+				if sideInfo.BlockType[gr][channel] == 2 && sideInfo.MixedBlockFlag[gr][channel] == 0 {
+					sideInfo.Region0Count[gr][channel] = 8 // Implicit
 				} else {
-					si.Region0Count[gr][ch] = 7 // Implicit
+					sideInfo.Region0Count[gr][channel] = 7 // Implicit
 				}
 				// The standard is wrong on this!!!
 				// Implicit
-				si.Region1Count[gr][ch] = 20 - si.Region0Count[gr][ch]
+				sideInfo.Region1Count[gr][channel] = 20 - sideInfo.Region0Count[gr][channel]
 			} else {
-				for region := 0; region < 3; region++ {
-					si.TableSelect[gr][ch][region] = s.Bits(5)
+				for region := range 3 {
+					sideInfo.TableSelect[gr][channel][region] = bitReader.Bits(5)
 				}
-				si.Region0Count[gr][ch] = s.Bits(4)
-				si.Region1Count[gr][ch] = s.Bits(3)
-				si.BlockType[gr][ch] = 0 // Implicit
+
+				sideInfo.Region0Count[gr][channel] = bitReader.Bits(4)
+				sideInfo.Region1Count[gr][channel] = bitReader.Bits(3)
+
+				sideInfo.BlockType[gr][channel] = 0 // Implicit
 				if !mpeg1Frame {
-					si.MixedBlockFlag[0][ch] = 0
+					sideInfo.MixedBlockFlag[0][channel] = 0
 				}
 			}
+
 			if mpeg1Frame {
-				si.Preflag[gr][ch] = s.Bits(1)
+				sideInfo.Preflag[gr][channel] = bitReader.Bits(1)
 			}
-			si.ScalefacScale[gr][ch] = s.Bits(1)
-			si.Count1TableSelect[gr][ch] = s.Bits(1)
+
+			sideInfo.ScalefacScale[gr][channel] = bitReader.Bits(1)
+			sideInfo.Count1TableSelect[gr][channel] = bitReader.Bits(1)
 		}
 	}
-	return si, nil
+
+	return sideInfo, nil
 }

@@ -26,31 +26,35 @@ import (
 )
 
 func run() error {
-	f, err := os.Open("classic.mp3")
+	file, err := os.Open("classic.mp3")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	d, err := mp3.NewDecoder(f)
+	decoder, err := mp3.NewDecoder(file)
 	if err != nil {
 		return err
 	}
 
-	c, ready, err := oto.NewContext(d.SampleRate(), 2, 2)
+	context, ready, err := oto.NewContext(decoder.SampleRate(), 2, 2)
 	if err != nil {
 		return err
 	}
+
 	<-ready
 
-	p := c.NewPlayer(d)
-	defer p.Close()
-	p.Play()
+	player := context.NewPlayer(decoder)
+	defer player.Close()
 
-	fmt.Printf("Length: %d[bytes]\n", d.Length())
+	player.Play()
+
+	fmt.Printf("Length: %d[bytes]\n", decoder.Length())
+
 	for {
 		time.Sleep(time.Second)
-		if !p.IsPlaying() {
+
+		if !player.IsPlaying() {
 			break
 		}
 	}

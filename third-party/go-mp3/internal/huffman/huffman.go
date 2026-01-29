@@ -345,59 +345,74 @@ var huffmanMain = [...]huffTables{
 	{huffmanTable[2773:], 31, 0},   // Table 33
 }
 
-func Decode(m *bits.Bits, table_num int) (x, y, v, w int, err error) {
+// Decode decodes Huffman coded values from the bit stream using the specified table.
+func Decode(m *bits.Bits, tableNum int) (x, y, v, w int, err error) {
 	point := 0
-	error := 1
+	errFlag := 1
 	bitsleft := 32
-	treelen := huffmanMain[table_num].treelen
-	linbits := huffmanMain[table_num].linbits
+	treelen := huffmanMain[tableNum].treelen
+	linbits := huffmanMain[tableNum].linbits
+
 	if treelen == 0 { // Check for empty tables
 		return 0, 0, 0, 0, nil
 	}
-	htptr := huffmanMain[table_num].hufftable
+
+	htptr := huffmanMain[tableNum].hufftable
 	for { // Start reading the Huffman code word,bit by bit
 		// Check if we've matched a code word
 		if (htptr[point] & 0xff00) == 0 {
-			error = 0
+			errFlag = 0
 			x = int((htptr[point] >> 4) & 0xf)
 			y = int(htptr[point] & 0xf)
+
 			break
 		}
+
 		if m.Bit() != 0 { // Go right in tree
 			for (htptr[point] & 0xff) >= 250 {
 				point += int(htptr[point]) & 0xff
 			}
+
 			point += int(htptr[point]) & 0xff
 		} else { // Go left in tree
 			for (htptr[point] >> 8) >= 250 {
 				point += int(htptr[point]) >> 8
 			}
+
 			point += int(htptr[point]) >> 8
 		}
+
 		bitsleft--
 		if bitsleft <= 0 || point >= treelen {
 			break
 		}
 	}
-	if error != 0 { // Check for error.
+
+	if errFlag != 0 { // Check for error.
 		err := fmt.Errorf("mp3: illegal Huff code in data. bleft = %d, point = %d. tab = %d.",
-			bitsleft, point, table_num)
+			bitsleft, point, tableNum)
+
 		return 0, 0, 0, 0, err
 	}
-	if table_num > 31 { // Process sign encodings for quadruples tables.
+
+	if tableNum > 31 { // Process sign encodings for quadruples tables.
 		v = (y >> 3) & 1
 		w = (y >> 2) & 1
 		x = (y >> 1) & 1
 		y = y & 1
+
 		if (v != 0) && (m.Bit() == 1) {
 			v = -v
 		}
+
 		if (w != 0) && (m.Bit() == 1) {
 			w = -w
 		}
+
 		if (x != 0) && (m.Bit() == 1) {
 			x = -x
 		}
+
 		if (y != 0) && (m.Bit() == 1) {
 			y = -y
 		}
@@ -405,15 +420,19 @@ func Decode(m *bits.Bits, table_num int) (x, y, v, w int, err error) {
 		if (linbits != 0) && (x == 15) {
 			x += m.Bits(linbits) // Get linbits
 		}
+
 		if (x != 0) && (m.Bit() == 1) {
 			x = -x // Get sign bit
 		}
+
 		if (linbits != 0) && (y == 15) {
 			y += m.Bits(linbits) // Get linbits
 		}
+
 		if (y != 0) && (m.Bit() == 1) {
 			y = -y // Get sign bit
 		}
 	}
+
 	return x, y, v, w, nil
 }

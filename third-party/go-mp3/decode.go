@@ -39,18 +39,24 @@ type Decoder struct {
 
 func (d *Decoder) readFrame() error {
 	var err error
+
 	d.frame, _, err = frame.Read(d.source, d.source.pos, d.frame)
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return io.EOF
 		}
-		if _, ok := err.(*consts.UnexpectedEOF); ok {
+
+		unexpectedEOF := &consts.UnexpectedEOF{}
+		if errors.As(err, &unexpectedEOF) {
 			// TODO: Log here?
 			return io.EOF
 		}
+
 		return err
 	}
+
 	d.buf = append(d.buf, d.frame.Decode()...)
+
 	return nil
 }
 
@@ -61,9 +67,11 @@ func (d *Decoder) Read(buf []byte) (int, error) {
 			return 0, err
 		}
 	}
+
 	n := copy(buf, d.buf)
 	d.buf = d.buf[n:]
 	d.pos += int64(n)
+
 	return n, nil
 }
 
@@ -81,6 +89,7 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	npos := int64(0)
+
 	switch whence {
 	case io.SeekStart:
 		npos = offset
@@ -91,33 +100,40 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 	default:
 		return 0, errors.New("mp3: invalid whence")
 	}
+
 	d.pos = npos
 	d.buf = nil
 	d.frame = nil
-	f := d.pos / d.bytesPerFrame
+	frameIdx := d.pos / d.bytesPerFrame
 	// If the frame is not first, read the previous ahead of reading that
 	// because the previous frame can affect the targeted frame.
-	if f > 0 {
-		f--
-		if _, err := d.source.Seek(d.frameStarts[f], 0); err != nil {
+	if frameIdx > 0 {
+		frameIdx--
+		if _, err := d.source.Seek(d.frameStarts[frameIdx], 0); err != nil {
 			return 0, err
 		}
+
 		if err := d.readFrame(); err != nil {
 			return 0, err
 		}
+
 		if err := d.readFrame(); err != nil {
 			return 0, err
 		}
+
 		d.buf = d.buf[d.bytesPerFrame+(d.pos%d.bytesPerFrame):]
 	} else {
-		if _, err := d.source.Seek(d.frameStarts[f], 0); err != nil {
+		if _, err := d.source.Seek(d.frameStarts[frameIdx], 0); err != nil {
 			return 0, err
 		}
+
 		if err := d.readFrame(); err != nil {
 			return 0, err
 		}
+
 		d.buf = d.buf[d.pos:]
 	}
+
 	return npos, nil
 }
 
@@ -142,6 +158,7 @@ func (d *Decoder) ensureFrameStartsAndLength() error {
 	if err != nil {
 		return err
 	}
+
 	if err := d.source.rewind(); err != nil {
 		return err
 	}
@@ -149,40 +166,50 @@ func (d *Decoder) ensureFrameStartsAndLength() error {
 	if err := d.source.skipTags(); err != nil {
 		return err
 	}
-	l := int64(0)
+
+	totalLength := int64(0)
+
 	for {
-		h, pos, err := frameheader.Read(d.source, d.source.pos)
+		header, pos, err := frameheader.Read(d.source, d.source.pos)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
-			if _, ok := err.(*consts.UnexpectedEOF); ok {
+
+			unexpectedEOF := &consts.UnexpectedEOF{}
+			if errors.As(err, &unexpectedEOF) {
 				// TODO: Log here?
 				break
 			}
+
 			return err
 		}
-		d.frameStarts = append(d.frameStarts, pos)
-		d.bytesPerFrame = int64(h.BytesPerFrame())
-		l += d.bytesPerFrame
 
-		framesize, err := h.FrameSize()
+		d.frameStarts = append(d.frameStarts, pos)
+		d.bytesPerFrame = int64(header.BytesPerFrame())
+		totalLength += d.bytesPerFrame
+
+		framesize, err := header.FrameSize()
 		if err != nil {
 			return err
 		}
+
 		buf := make([]byte, framesize-4)
 		if _, err := d.source.ReadFull(buf); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
+
 			return err
 		}
 	}
-	d.length = l
+
+	d.length = totalLength
 
 	if _, err := d.source.Seek(pos, io.SeekStart); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -202,30 +229,32 @@ func (d *Decoder) Length() int64 {
 // even if the source is single channel MP3.
 // Thus, a sample always consists of 4 bytes.
 func NewDecoder(r io.Reader) (*Decoder, error) {
-	s := &source{
+	src := &source{
 		reader: r,
 	}
-	d := &Decoder{
-		source: s,
+	decoder := &Decoder{
+		source: src,
 		length: invalidLength,
 	}
 
-	if err := s.skipTags(); err != nil {
+	if err := src.skipTags(); err != nil {
 		return nil, err
 	}
 	// TODO: Is readFrame here really needed?
-	if err := d.readFrame(); err != nil {
+	if err := decoder.readFrame(); err != nil {
 		return nil, err
 	}
-	freq, err := d.frame.SamplingFrequency()
+
+	freq, err := decoder.frame.SamplingFrequency()
 	if err != nil {
 		return nil, err
 	}
-	d.sampleRate = freq
 
-	if err := d.ensureFrameStartsAndLength(); err != nil {
+	decoder.sampleRate = freq
+
+	if err := decoder.ensureFrameStartsAndLength(); err != nil {
 		return nil, err
 	}
 
-	return d, nil
+	return decoder, nil
 }

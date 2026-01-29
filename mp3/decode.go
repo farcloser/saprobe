@@ -7,9 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	gomp3 "github.com/farcloser/saprobe/third-party/go-mp3"
-
 	"github.com/farcloser/saprobe"
+	gomp3 "github.com/farcloser/saprobe/third-party/go-mp3"
 )
 
 const (
