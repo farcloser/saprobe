@@ -4,6 +4,8 @@ go 1.25.6
 
 require (
 	github.com/abema/go-mp4 v1.4.1
+	github.com/containerd/nerdctl/mod/tigron v0.0.0-20260121031139-a630881afd01
+	github.com/farcloser/agar v0.0.0-20260127201813-e4cfb90faa46
 	github.com/farcloser/primordium v0.0.0-20260128062542-c661940b809b
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jfreymuth/oggvorbis v1.0.5
@@ -12,6 +14,7 @@ require (
 )
 
 require (
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
@@ -24,6 +27,8 @@ require (
 	github.com/samber/slog-common v0.19.0 // indirect
 	github.com/samber/slog-zerolog/v2 v2.9.0 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )
