@@ -161,15 +161,8 @@ func (d *Decoder) decodeSCE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 		}
 	} else {
 		d.decodeSCEEscape(bb, chanBits, int(numSamples))
-		bytesShifted = 0
-	}
 
-	// Read shift buffer if active.
-	if bytesShifted != 0 {
-		shift := uint8(bytesShifted * 8)
-		for i := 0; i < int(numSamples); i++ {
-			d.shiftBuffer[i] = uint16(bb.read(shift))
-		}
+		bytesShifted = 0
 	}
 
 	// Write output.
@@ -202,7 +195,7 @@ func (d *Decoder) decodeSCECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	numU := headerByte & 0x1f
 
 	var coefsU [maxCoefs]int16
-	for i := uint32(0); i < numU; i++ {
+	for i := range numU {
 		coefsU[i] = int16(bb.read(16))
 	}
 
@@ -234,7 +227,7 @@ func (d *Decoder) decodeSCECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	// Read shift buffer from saved position.
 	if bytesShifted != 0 {
 		shift := uint8(bytesShifted * 8)
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			d.shiftBuffer[i] = uint16(shiftBits.read(shift))
 		}
 	}
@@ -246,14 +239,15 @@ func (d *Decoder) decodeSCEEscape(bb *bitBuffer, chanBits uint32, numSamples int
 	shift := uint32(32) - chanBits
 
 	if chanBits <= 16 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			val := int32(bb.read(uint8(chanBits)))
 			val = (val << shift) >> shift
 			d.mixBufferU[i] = val
 		}
 	} else {
 		extraBits := chanBits - 16
-		for i := 0; i < numSamples; i++ {
+
+		for i := range numSamples {
 			val := int32(bb.read(16))
 			val = (val << 16) >> shift
 			d.mixBufferU[i] = val | int32(bb.read(uint8(extraBits)))
@@ -288,8 +282,10 @@ func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	}
 
 	var mixBits, mixRes int32
+
 	if escapeFlag == 0 {
 		var err error
+
 		mixBits, mixRes, err = d.decodeCPECompressed(bb, chanBits, bytesShifted, int(numSamples))
 		if err != nil {
 			return 0, err
@@ -297,16 +293,8 @@ func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	} else {
 		chanBits = uint32(d.config.BitDepth) // Reset for escape.
 		d.decodeCPEEscape(bb, chanBits, int(numSamples))
-		bytesShifted = 0
-	}
 
-	// Read shift buffer if active.
-	if bytesShifted != 0 {
-		shift := uint8(bytesShifted * 8)
-		for i := 0; i < int(numSamples)*2; i += 2 {
-			d.shiftBuffer[i+0] = uint16(bb.read(shift))
-			d.shiftBuffer[i+1] = uint16(bb.read(shift))
-		}
+		bytesShifted = 0
 	}
 
 	// Unmix and write output.
@@ -328,7 +316,11 @@ func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	return numSamples, nil
 }
 
-func (d *Decoder) decodeCPECompressed(bb *bitBuffer, chanBits uint32, bytesShifted, numSamples int) (int32, int32, error) {
+func (d *Decoder) decodeCPECompressed(
+	bb *bitBuffer,
+	chanBits uint32,
+	bytesShifted, numSamples int,
+) (int32, int32, error) {
 	mixBits := int32(bb.read(8))
 	mixRes := int32(int8(bb.read(8)))
 
@@ -342,7 +334,7 @@ func (d *Decoder) decodeCPECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	numU := headerByte & 0x1f
 
 	var coefsU [maxCoefs]int16
-	for i := uint32(0); i < numU; i++ {
+	for i := range numU {
 		coefsU[i] = int16(bb.read(16))
 	}
 
@@ -356,7 +348,7 @@ func (d *Decoder) decodeCPECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	numV := headerByte & 0x1f
 
 	var coefsV [maxCoefs]int16
-	for i := uint32(0); i < numV; i++ {
+	for i := range numV {
 		coefsV[i] = int16(bb.read(16))
 	}
 
@@ -368,6 +360,7 @@ func (d *Decoder) decodeCPECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	}
 
 	pb := uint32(d.config.PB)
+
 	var agP agParams
 
 	// Decompress and predict U channel.
@@ -414,7 +407,7 @@ func (d *Decoder) decodeCPEEscape(bb *bitBuffer, chanBits uint32, numSamples int
 	shift := uint32(32) - chanBits
 
 	if chanBits <= 16 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			val := int32(bb.read(uint8(chanBits)))
 			val = (val << shift) >> shift
 			d.mixBufferU[i] = val
@@ -425,7 +418,8 @@ func (d *Decoder) decodeCPEEscape(bb *bitBuffer, chanBits uint32, numSamples int
 		}
 	} else {
 		extraBits := chanBits - 16
-		for i := 0; i < numSamples; i++ {
+
+		for i := range numSamples {
 			val := int32(bb.read(16))
 			val = (val << 16) >> shift
 			d.mixBufferU[i] = val | int32(bb.read(uint8(extraBits)))
