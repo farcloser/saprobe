@@ -134,7 +134,7 @@ func extractCookie(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]byte, error) {
 	entryCount := binary.BigEndian.Uint32(data[4:8])
 	pos := stsdPayloadHeader
 
-	for i := uint32(0); i < entryCount; i++ {
+	for range entryCount {
 		if pos+sampleEntryHeaderSize > len(data) {
 			break
 		}

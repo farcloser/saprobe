@@ -86,6 +86,7 @@ func (b *bitBuffer) rewind(numBits uint32) {
 
 	if b.bitIdx >= numBits {
 		b.bitIdx -= numBits
+
 		return
 	}
 

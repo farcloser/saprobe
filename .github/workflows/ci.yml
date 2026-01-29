@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
       - name: Checkout code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
@@ -88,5 +88,41 @@ jobs:
         run: |
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Test matrix failed: ${{ needs.test.result }}"
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c  # v6.1.0
+        with:
+          go-version: '1.25.6'
+          cache: true
+
+      - name: Build binary
+        run: make build
+
+      - name: Verify binary
+        run: ./bin/saprobe --version
+
+  build-success:
+    name: Build
+    if: always()
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check build matrix results
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "Build matrix failed: ${{ needs.build.result }}"
             exit 1
           fi

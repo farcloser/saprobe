@@ -58,7 +58,7 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding frame: %w", parseErr)
 		}
 
-		blockSize := int(f.Header.BlockSize)
+		blockSize := int(f.BlockSize)
 		frameBytes := blockSize * nChannels * bytesPerSample
 
 		if cap(scratch) < frameBytes {
@@ -82,7 +82,10 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 	case saprobe.Depth16:
 		for i := range blockSize {
 			for ch := range nChannels {
-				binary.LittleEndian.PutUint16(dst[pos:], uint16(int16(subframes[ch].Samples[i]))) //nolint:gosec // intentional two's complement conversion
+				binary.LittleEndian.PutUint16(
+					dst[pos:],
+					uint16(int16(subframes[ch].Samples[i])),
+				)
 				pos += 2
 			}
 		}
@@ -99,7 +102,10 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 	case saprobe.Depth32:
 		for i := range blockSize {
 			for ch := range nChannels {
-				binary.LittleEndian.PutUint32(dst[pos:], uint32(subframes[ch].Samples[i])) //nolint:gosec // intentional two's complement conversion
+				binary.LittleEndian.PutUint32(
+					dst[pos:],
+					uint32(subframes[ch].Samples[i]),
+				)
 				pos += 4
 			}
 		}

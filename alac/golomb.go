@@ -6,17 +6,17 @@ import "math/bits"
 // Ported from ag_dec.c and aglib.h.
 
 const (
-	qbShift    = 9
-	qb         = 1 << qbShift // 512
-	mmulShift  = 2
-	mdenShift  = qbShift - mmulShift - 1 // 6
-	moff       = 1 << (mdenShift - 2)    // 16
-	bitoff     = 24
-	maxPrefix16    = 9
-	maxPrefix32    = 9
-	maxDatatype16  = 16
-	nMaxMeanClamp  = 0xffff
-	nMeanClampVal  = 0xffff
+	qbShift       = 9
+	qb            = 1 << qbShift // 512
+	mmulShift     = 2
+	mdenShift     = qbShift - mmulShift - 1 // 6
+	moff          = 1 << (mdenShift - 2)    // 16
+	bitoff        = 24
+	maxPrefix16   = 9
+	maxPrefix32   = 9
+	maxDatatype16 = 16
+	nMaxMeanClamp = 0xffff
+	nMeanClampVal = 0xffff
 )
 
 type agParams struct {
@@ -127,7 +127,7 @@ func dynGet(in []byte, bitPos *uint32, m, k uint32) uint32 {
 }
 
 // dynGet32Bit decodes one Golomb-coded value (32-bit variant used for sample residuals).
-func dynGet32Bit(in []byte, bitPos *uint32, m uint32, k int32, maxBits int32) uint32 {
+func dynGet32Bit(in []byte, bitPos *uint32, m uint32, k, maxBits int32) uint32 {
 	tempBits := *bitPos
 
 	streamLong := read32bit(in, int(tempBits>>3))
@@ -183,11 +183,7 @@ func dynDecomp(params *agParams, bb *bitBuffer, pc []int32, numSamples, maxSize 
 		}
 
 		m := mb >> qbShift
-		k := lg3a(int32(m))
-
-		if k > int32(kbLocal) {
-			k = int32(kbLocal)
-		}
+		k := min(lg3a(int32(m)), int32(kbLocal))
 
 		m = (1 << uint32(k)) - 1
 
@@ -213,10 +209,8 @@ func dynDecomp(params *agParams, bb *bitBuffer, pc []int32, numSamples, maxSize 
 		// Check for zero run mode.
 		if (mb<<mmulShift) < qb && c < numSamples {
 			zmode = 1
-			k32 := lead(int32(mb)) - bitoff + int32((mb+moff)>>mdenShift)
-			if k32 < 0 {
-				k32 = 0
-			}
+
+			k32 := max(lead(int32(mb))-bitoff+int32((mb+moff)>>mdenShift), 0)
 
 			mz := ((uint32(1) << uint32(k32)) - 1) & wbLocal
 
@@ -226,7 +220,7 @@ func dynDecomp(params *agParams, bb *bitBuffer, pc []int32, numSamples, maxSize 
 				return errSampleOverrun
 			}
 
-			for j := uint32(0); j < n; j++ {
+			for range n {
 				pc[c] = 0
 				c++
 			}

@@ -14,7 +14,7 @@ func writeStereo16(out []byte, u, v []int32, chanIdx, numChan, numSamples int, m
 	offset := chanIdx * 2
 
 	if mixRes != 0 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i] + v[i] - ((mixRes * v[i]) >> mixBits)
 			r := l - v[i]
 
@@ -23,7 +23,7 @@ func writeStereo16(out []byte, u, v []int32, chanIdx, numChan, numSamples int, m
 			binary.LittleEndian.PutUint16(out[pos+2:], uint16(int16(r)))
 		}
 	} else {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			pos := offset + i*stride
 			binary.LittleEndian.PutUint16(out[pos:], uint16(int16(u[i])))
 			binary.LittleEndian.PutUint16(out[pos+2:], uint16(int16(v[i])))
@@ -36,7 +36,7 @@ func writeStereo20(out []byte, u, v []int32, chanIdx, numChan, numSamples int, m
 	offset := chanIdx * 3
 
 	if mixRes != 0 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i] + v[i] - ((mixRes * v[i]) >> mixBits)
 			r := l - v[i]
 			l <<= 4
@@ -51,7 +51,7 @@ func writeStereo20(out []byte, u, v []int32, chanIdx, numChan, numSamples int, m
 			out[pos+5] = byte(r >> 16)
 		}
 	} else {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			pos := offset + i*stride
 			val := u[i] << 4
 			out[pos+0] = byte(val)
@@ -67,13 +67,14 @@ func writeStereo20(out []byte, u, v []int32, chanIdx, numChan, numSamples int, m
 }
 
 func writeStereo24(out []byte, u, v []int32, chanIdx, numChan, numSamples int,
-	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int) {
+	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int,
+) {
 	stride := numChan * 3
 	offset := chanIdx * 3
 	shift := bytesShifted * 8
 
 	if mixRes != 0 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i] + v[i] - ((mixRes * v[i]) >> mixBits)
 			r := l - v[i]
 
@@ -91,7 +92,7 @@ func writeStereo24(out []byte, u, v []int32, chanIdx, numChan, numSamples int,
 			out[pos+5] = byte(r >> 16)
 		}
 	} else {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i]
 			r := v[i]
 
@@ -112,13 +113,14 @@ func writeStereo24(out []byte, u, v []int32, chanIdx, numChan, numSamples int,
 }
 
 func writeStereo32(out []byte, u, v []int32, chanIdx, numChan, numSamples int,
-	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int) {
+	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int,
+) {
 	stride := numChan * 4
 	offset := chanIdx * 4
 	shift := bytesShifted * 8
 
 	if mixRes != 0 {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i] + v[i] - ((mixRes * v[i]) >> mixBits)
 			r := l - v[i]
 
@@ -132,7 +134,7 @@ func writeStereo32(out []byte, u, v []int32, chanIdx, numChan, numSamples int,
 			binary.LittleEndian.PutUint32(out[pos+4:], uint32(r))
 		}
 	} else {
-		for i := 0; i < numSamples; i++ {
+		for i := range numSamples {
 			l := u[i]
 			r := v[i]
 
@@ -154,7 +156,7 @@ func writeMono16(out []byte, u []int32, chanIdx, numChan, numSamples int) {
 	stride := numChan * 2
 	offset := chanIdx * 2
 
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		pos := offset + i*stride
 		binary.LittleEndian.PutUint16(out[pos:], uint16(int16(u[i])))
 	}
@@ -164,7 +166,7 @@ func writeMono20(out []byte, u []int32, chanIdx, numChan, numSamples int) {
 	stride := numChan * 3
 	offset := chanIdx * 3
 
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		pos := offset + i*stride
 		val := u[i] << 4
 		out[pos+0] = byte(val)
@@ -178,7 +180,7 @@ func writeMono24(out []byte, u []int32, chanIdx, numChan, numSamples int, shiftB
 	offset := chanIdx * 3
 	shift := bytesShifted * 8
 
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		val := u[i]
 		if bytesShifted != 0 {
 			val = (val << shift) | int32(shiftBuf[i])
@@ -196,7 +198,7 @@ func writeMono32(out []byte, u []int32, chanIdx, numChan, numSamples int, shiftB
 	offset := chanIdx * 4
 	shift := bytesShifted * 8
 
-	for i := 0; i < numSamples; i++ {
+	for i := range numSamples {
 		val := u[i]
 		if bytesShifted != 0 {
 			val = (val << shift) | int32(shiftBuf[i])

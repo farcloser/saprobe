@@ -58,4 +58,3 @@ func ParseConfig(cookie []byte) (Config, error) {
 		SampleRate:    binary.BigEndian.Uint32(data[20:24]),
 	}, nil
 }
-

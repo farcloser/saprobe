@@ -25,7 +25,7 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 		Channels:   uint(format.Channels), //nolint:gosec // channel count is always small positive
 	}
 
-	buf := make([]byte, len(samples)*2) //nolint:gosec // length is bounded by decoded audio
+	buf := make([]byte, len(samples)*2)
 
 	for i, s := range samples {
 		scaled := math.Round(float64(s) * math.MaxInt16)
