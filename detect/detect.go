@@ -1,4 +1,3 @@
-// Package detect identifies audio codecs by inspecting file header bytes.
 package detect
 
 import (
@@ -56,14 +55,14 @@ const (
 
 // Identify reads the header from rs and returns the detected audio codec.
 // The reader position is reset to the start before returning.
-func Identify(rs io.ReadSeeker) (Codec, error) {
+func Identify(reader io.ReadSeeker) (Codec, error) {
 	var header [headerSize]byte
 
-	if _, err := io.ReadFull(rs, header[:]); err != nil {
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
 		return Unknown, fmt.Errorf("reading header: %w", err)
 	}
 
-	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return Unknown, fmt.Errorf("seeking to start: %w", err)
 	}
 

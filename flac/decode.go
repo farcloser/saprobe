@@ -36,12 +36,13 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 	format := saprobe.PCMFormat{
 		SampleRate: int(info.SampleRate),
 		BitDepth:   bitDepth,
-		Channels:   uint(nChannels),
+		Channels:   uint(nChannels), //nolint:gosec // nChannels comes from uint8, always fits in uint.
 	}
 
 	// Pre-allocate output buffer when total sample count is known.
 	var buf []byte
 	if info.NSamples > 0 {
+		//nolint:gosec // NSamples (uint64) fits in int for any real audio file.
 		buf = make([]byte, 0, int(info.NSamples)*nChannels*bytesPerSample)
 	}
 
@@ -49,7 +50,7 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 	var scratch []byte
 
 	for {
-		f, parseErr := stream.ParseNext()
+		audioFrame, parseErr := stream.ParseNext()
 		if errors.Is(parseErr, io.EOF) {
 			break
 		}
@@ -58,7 +59,7 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding frame: %w", parseErr)
 		}
 
-		blockSize := int(f.BlockSize)
+		blockSize := int(audioFrame.BlockSize)
 		frameBytes := blockSize * nChannels * bytesPerSample
 
 		if cap(scratch) < frameBytes {
@@ -67,7 +68,7 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 			scratch = scratch[:frameBytes]
 		}
 
-		interleave(scratch, f.Subframes, blockSize, nChannels, bitDepth)
+		interleave(scratch, audioFrame.Subframes, blockSize, nChannels, bitDepth)
 		buf = append(buf, scratch...)
 	}
 
@@ -84,7 +85,7 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 			for ch := range nChannels {
 				binary.LittleEndian.PutUint16(
 					dst[pos:],
-					uint16(int16(subframes[ch].Samples[i])),
+					uint16(int16(subframes[ch].Samples[i])), //nolint:gosec // Intentional int32-to-int16 truncation.
 				)
 				pos += 2
 			}
@@ -104,10 +105,14 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 			for ch := range nChannels {
 				binary.LittleEndian.PutUint32(
 					dst[pos:],
-					uint32(subframes[ch].Samples[i]),
+					uint32(subframes[ch].Samples[i]), //nolint:gosec // int32-to-uint32 reinterpretation.
 				)
 				pos += 4
 			}
 		}
+	case saprobe.Depth20:
+		fallthrough
+	default:
+		panic(fmt.Sprintf("flac: interleave called with unsupported bit depth %d", depth))
 	}
 }

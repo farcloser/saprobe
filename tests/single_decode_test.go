@@ -20,12 +20,15 @@ import (
 	"github.com/farcloser/saprobe/vorbis"
 )
 
+//nolint:gochecknoglobals
 var singleFile = flag.String("single-file", "", "single audio file for detailed decode comparison")
 
 // TestSingleDecode performs detailed comparison of a single file between saprobe and ffmpeg.
 //
 // Run: go test ./tests/ -v -run TestSingleDecode -single-file /path/to/file.m4a.
 func TestSingleDecode(t *testing.T) {
+	t.Parallel()
+
 	if *singleFile == "" {
 		t.Skip("no -single-file flag provided")
 	}
@@ -35,13 +38,13 @@ func TestSingleDecode(t *testing.T) {
 		t.Fatalf("file not found: %s", path)
 	}
 
-	t.Logf("=== SINGLE FILE DECODE ANALYSIS ===")
+	t.Log("=== SINGLE FILE DECODE ANALYSIS ===")
 	t.Logf("File: %s", path)
 
 	// Step 1: Probe file properties with ffprobe
 	props := probeFileProperties(t, path)
-	t.Logf("")
-	t.Logf("=== FILE PROPERTIES (ffprobe) ===")
+	t.Log("")
+	t.Log("=== FILE PROPERTIES (ffprobe) ===")
 	t.Logf("Codec:       %s", props.codec)
 	t.Logf("Sample Rate: %d Hz", props.sampleRate)
 	t.Logf("Channels:    %d", props.channels)
@@ -55,14 +58,14 @@ func TestSingleDecode(t *testing.T) {
 	t.Logf("PCM Format:  %s (%d bytes/sample)", pcmFormat, bytesPerSample)
 
 	// Step 3: Decode with ffmpeg
-	t.Logf("")
-	t.Logf("=== DECODING WITH FFMPEG ===")
+	t.Log("")
+	t.Log("=== DECODING WITH FFMPEG ===")
 	ffmpegPCM := decodeWithFFmpeg(t, path, pcmFormat)
 	t.Logf("FFmpeg output: %d bytes", len(ffmpegPCM))
 
 	// Step 4: Decode with saprobe
-	t.Logf("")
-	t.Logf("=== DECODING WITH SAPROBE ===")
+	t.Log("")
+	t.Log("=== DECODING WITH SAPROBE ===")
 
 	saprobePCM, saprobeFormat, err := decodeWithSaprobe(t, path)
 	if err != nil {
@@ -74,8 +77,8 @@ func TestSingleDecode(t *testing.T) {
 		saprobeFormat.SampleRate, saprobeFormat.BitDepth, saprobeFormat.Channels)
 
 	// Step 5: Compare
-	t.Logf("")
-	t.Logf("=== COMPARISON ===")
+	t.Log("")
+	t.Log("=== COMPARISON ===")
 
 	if len(saprobePCM) != len(ffmpegPCM) {
 		t.Logf("SIZE MISMATCH: saprobe=%d, ffmpeg=%d (diff=%d bytes)",
@@ -89,7 +92,7 @@ func TestSingleDecode(t *testing.T) {
 	}
 
 	if bytes.Equal(saprobePCM, ffmpegPCM) {
-		t.Logf("PERFECT MATCH!")
+		t.Log("PERFECT MATCH!")
 
 		return
 	}
@@ -209,7 +212,7 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 
 	t.Logf("Detected codec: %s", codec)
 
-	switch codec {
+	switch codec { //revive:disable-line:identical-switch-branches
 	case detect.FLAC:
 		return flac.Decode(file)
 	case detect.MP3:
@@ -218,6 +221,8 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 		return vorbis.Decode(file)
 	case detect.ALAC:
 		return alac.Decode(file)
+	case detect.Unknown:
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	default:
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	}
@@ -247,7 +252,7 @@ func analyzeDiscrepancies(t *testing.T, saprobeData, ffmpegData []byte, channels
 	}
 
 	if firstDiffByte == -1 {
-		t.Logf("No differences found (unexpected)")
+		t.Log("No differences found (unexpected)")
 
 		return
 	}
@@ -257,7 +262,7 @@ func analyzeDiscrepancies(t *testing.T, saprobeData, ffmpegData []byte, channels
 	channelIndex := (firstDiffByte % frameSize) / bytesPerSample
 	byteInSample := firstDiffByte % bytesPerSample
 
-	t.Logf("FIRST DIFFERENCE:")
+	t.Log("FIRST DIFFERENCE:")
 	t.Logf("  Byte offset:    %d (0x%X)", firstDiffByte, firstDiffByte)
 	t.Logf("  Sample index:   %d", sampleIndex)
 	t.Logf("  Channel:        %d", channelIndex)
@@ -270,7 +275,7 @@ func analyzeDiscrepancies(t *testing.T, saprobeData, ffmpegData []byte, channels
 	startSample := max(0, sampleIndex-contextSamples)
 	endSample := min(minLen/frameSize, sampleIndex+contextSamples+1)
 
-	t.Logf("")
+	t.Log("")
 	t.Logf("CONTEXT (samples %d to %d):", startSample, endSample-1)
 
 	for s := startSample; s < endSample; s++ {
@@ -296,8 +301,8 @@ func analyzeDiscrepancies(t *testing.T, saprobeData, ffmpegData []byte, channels
 		}
 	}
 
-	t.Logf("")
-	t.Logf("STATISTICS:")
+	t.Log("")
+	t.Log("STATISTICS:")
 	t.Logf("  Total differing bytes:   %d", diffCount)
 	t.Logf("  Total differing samples: %d", len(diffSamples))
 	t.Logf("  Percentage of samples:   %.2f%%", float64(len(diffSamples))*100/float64(minLen/frameSize))
@@ -330,6 +335,8 @@ func extractSampleValues(data []byte, sampleIndex, channels, bytesPerSample int)
 			values[ch] = val
 		case 4:
 			values[ch] = int32(binary.LittleEndian.Uint32(data[chOffset:]))
+
+		default:
 		}
 	}
 
@@ -347,18 +354,19 @@ func analyzeDifferencePatterns(t *testing.T, saprobeData, ffmpegData []byte, cha
 
 	for i := range minLen {
 		if saprobeData[i] != ffmpegData[i] {
-			if i < thirds {
+			switch {
+			case i < thirds:
 				diffFirst++
-			} else if i < 2*thirds {
+			case i < 2*thirds:
 				diffMiddle++
-			} else {
+			default:
 				diffLast++
 			}
 		}
 	}
 
-	t.Logf("")
-	t.Logf("DIFFERENCE DISTRIBUTION:")
+	t.Log("")
+	t.Log("DIFFERENCE DISTRIBUTION:")
 	t.Logf("  First third:  %d bytes", diffFirst)
 	t.Logf("  Middle third: %d bytes", diffMiddle)
 	t.Logf("  Last third:   %d bytes", diffLast)
@@ -381,8 +389,8 @@ func analyzeDifferencePatterns(t *testing.T, saprobeData, ffmpegData []byte, cha
 	}
 
 	if samplesDiffering > 0 {
-		t.Logf("")
-		t.Logf("SAMPLE VALUE DIFFERENCES (saprobe - ffmpeg):")
+		t.Log("")
+		t.Log("SAMPLE VALUE DIFFERENCES (saprobe - ffmpeg):")
 
 		// Show top 10 most common differences
 		type diffEntry struct {

@@ -29,7 +29,7 @@ func newBitBuffer(data []byte) *bitBuffer {
 func (b *bitBuffer) read(numBits uint8) uint32 {
 	// Load 3 bytes starting at current position (24 bits available).
 	returnBits := uint32(b.buf[b.pos])<<16 | uint32(b.buf[b.pos+1])<<8 | uint32(b.buf[b.pos+2])
-	returnBits = (returnBits << b.bitIdx) & 0x00FFFFFF
+	returnBits = (returnBits << b.bitIdx) & 0x00FFFFFF //revive:disable-line:add-constant
 	returnBits >>= 24 - uint32(numBits)
 
 	b.bitIdx += uint32(numBits)
@@ -43,7 +43,7 @@ func (b *bitBuffer) read(numBits uint8) uint32 {
 // Equivalent to BitBufferReadSmall.
 func (b *bitBuffer) readSmall(numBits uint8) uint8 {
 	returnBits := uint16(b.buf[b.pos])<<8 | uint16(b.buf[b.pos+1])
-	returnBits = returnBits << b.bitIdx
+	returnBits <<= b.bitIdx
 	returnBits >>= 16 - uint16(numBits)
 
 	b.bitIdx += uint32(numBits)
@@ -64,48 +64,11 @@ func (b *bitBuffer) readOne() uint8 {
 	return returnBit
 }
 
-// peek returns up to 16 bits without advancing the position.
-func (b *bitBuffer) peek(numBits uint8) uint32 {
-	returnBits := uint32(b.buf[b.pos])<<16 | uint32(b.buf[b.pos+1])<<8 | uint32(b.buf[b.pos+2])
-
-	return ((returnBits << b.bitIdx) & 0x00FFFFFF) >> (24 - uint32(numBits))
-}
-
 // advance skips forward by numBits bits.
 func (b *bitBuffer) advance(numBits uint32) {
 	b.bitIdx += numBits
 	b.pos += int(b.bitIdx >> 3)
 	b.bitIdx &= 7
-}
-
-// rewind moves backward by numBits bits.
-func (b *bitBuffer) rewind(numBits uint32) {
-	if numBits == 0 {
-		return
-	}
-
-	if b.bitIdx >= numBits {
-		b.bitIdx -= numBits
-
-		return
-	}
-
-	numBits -= b.bitIdx
-	b.bitIdx = 0
-
-	numBytes := numBits / 8
-	numBits %= 8
-	b.pos -= int(numBytes)
-
-	if numBits > 0 {
-		b.bitIdx = 8 - numBits
-		b.pos--
-	}
-
-	if b.pos < 0 {
-		b.pos = 0
-		b.bitIdx = 0
-	}
 }
 
 // byteAlign advances to the next byte boundary (if not already aligned).
@@ -115,11 +78,6 @@ func (b *bitBuffer) byteAlign() {
 	}
 
 	b.advance(8 - b.bitIdx)
-}
-
-// position returns the current bit position from the start of the buffer.
-func (b *bitBuffer) position() uint32 {
-	return uint32(b.pos)*8 + b.bitIdx
 }
 
 // pastEnd returns true if the read position is at or past the original data end.

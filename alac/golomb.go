@@ -7,7 +7,7 @@ import "math/bits"
 
 const (
 	qbShift       = 9
-	qb            = 1 << qbShift // 512
+	quantBits     = 1 << qbShift // 512
 	mmulShift     = 2
 	mdenShift     = qbShift - mmulShift - 1 // 6
 	moff          = 1 << (mdenShift - 2)    // 16
@@ -17,6 +17,7 @@ const (
 	maxDatatype16 = 16
 	nMaxMeanClamp = 0xffff
 	nMeanClampVal = 0xffff
+	maxZeroRun    = 65535 // Maximum zero-run length before resetting zmode.
 )
 
 type agParams struct {
@@ -29,15 +30,15 @@ type agParams struct {
 	maxrun  uint32
 }
 
-func setAGParams(params *agParams, m, p, k, f, s, maxrun uint32) {
-	params.mb = m
-	params.mb0 = m
-	params.pb = p
-	params.kb = k
-	params.wb = (1 << k) - 1
-	params.qb = qb - p
-	params.fw = f
-	params.sw = s
+func setAGParams(params *agParams, meanBase, partBound, kBase, frameWin, sampleWin, maxrun uint32) {
+	params.mb = meanBase
+	params.mb0 = meanBase
+	params.pb = partBound
+	params.kb = kBase
+	params.wb = (1 << kBase) - 1
+	params.qb = quantBits - partBound
+	params.fw = frameWin
+	params.sw = sampleWin
 	params.maxrun = maxrun
 }
 
@@ -53,7 +54,7 @@ func lead(m int32) int32 {
 
 // lg3a computes floor(log2(x+3)).
 func lg3a(x int32) int32 {
-	return 31 - lead(x+3)
+	return 31 - lead(x+3) //revive:disable-line:add-constant
 }
 
 // read32bit reads 4 bytes big-endian from a byte slice at the given offset.
@@ -63,14 +64,14 @@ func read32bit(buf []byte, offset int) uint32 {
 }
 
 // getStreamBits reads up to 32 bits from an arbitrary bit position in a byte buffer.
-func getStreamBits(in []byte, bitOffset, numBits uint32) uint32 {
+func getStreamBits(input []byte, bitOffset, numBits uint32) uint32 {
 	byteOffset := bitOffset / 8
-	load1 := read32bit(in, int(byteOffset))
+	load1 := read32bit(input, int(byteOffset))
 
 	if numBits+(bitOffset&7) > 32 {
 		// Need bits from a 5th byte.
 		result := load1 << (bitOffset & 7)
-		load2 := uint32(in[byteOffset+4])
+		load2 := uint32(input[byteOffset+4])
 		load2shift := 8 - (numBits + (bitOffset & 7) - 32)
 		load2 >>= load2shift
 		result >>= 32 - numBits
@@ -88,10 +89,10 @@ func getStreamBits(in []byte, bitOffset, numBits uint32) uint32 {
 }
 
 // dynGet decodes one Golomb-coded value (16-bit variant used for zero-run counts).
-func dynGet(in []byte, bitPos *uint32, m, k uint32) uint32 {
+func dynGet(input []byte, bitPos *uint32, golombM, golombK uint32) uint32 {
 	tempBits := *bitPos
 
-	streamLong := read32bit(in, int(tempBits>>3))
+	streamLong := read32bit(input, int(tempBits>>3))
 	streamLong <<= tempBits & 7
 
 	// Count leading ones (= leading zeros in complement).
@@ -110,15 +111,15 @@ func dynGet(in []byte, bitPos *uint32, m, k uint32) uint32 {
 
 	tempBits += pre + 1
 	streamLong <<= pre + 1
-	v := streamLong >> (32 - k)
-	tempBits += k
+	val := streamLong >> (32 - golombK)
+	tempBits += golombK
 
 	var result uint32
-	if v < 2 {
-		result = pre * m
+	if val < 2 {
+		result = pre * golombM
 		tempBits--
 	} else {
-		result = pre*m + v - 1
+		result = pre*golombM + val - 1
 	}
 
 	*bitPos = tempBits
@@ -127,31 +128,31 @@ func dynGet(in []byte, bitPos *uint32, m, k uint32) uint32 {
 }
 
 // dynGet32Bit decodes one Golomb-coded value (32-bit variant used for sample residuals).
-func dynGet32Bit(in []byte, bitPos *uint32, m uint32, k, maxBits int32) uint32 {
+func dynGet32Bit(input []byte, bitPos *uint32, golombM uint32, golombK, maxBits int32) uint32 {
 	tempBits := *bitPos
 
-	streamLong := read32bit(in, int(tempBits>>3))
+	streamLong := read32bit(input, int(tempBits>>3))
 	streamLong <<= tempBits & 7
 
 	// Count leading ones.
 	result := uint32(lead(int32(^streamLong)))
 
 	if result >= maxPrefix32 {
-		result = getStreamBits(in, tempBits+maxPrefix32, uint32(maxBits))
+		result = getStreamBits(input, tempBits+maxPrefix32, uint32(maxBits))
 		tempBits += maxPrefix32 + uint32(maxBits)
 	} else {
 		tempBits += result + 1
 
-		if k != 1 {
+		if golombK != 1 {
 			streamLong <<= result + 1
-			v := streamLong >> (32 - uint32(k))
+			v := streamLong >> (32 - uint32(golombK))
 
 			if v >= 2 {
-				result = result*m + v - 1
-				tempBits += uint32(k)
+				result = result*golombM + v - 1
+				tempBits += uint32(golombK)
 			} else {
-				result = result * m
-				tempBits += uint32(k) - 1
+				result *= golombM
+				tempBits += uint32(golombK) - 1
 			}
 		}
 	}
@@ -162,79 +163,79 @@ func dynGet32Bit(in []byte, bitPos *uint32, m uint32, k, maxBits int32) uint32 {
 }
 
 // dynDecomp performs adaptive Golomb-Rice entropy decoding of a sample block.
-// Writes decoded prediction residuals into pc.
-func dynDecomp(params *agParams, bb *bitBuffer, pc []int32, numSamples, maxSize int) error {
-	in := bb.buf[bb.pos:]
-	startPos := bb.bitIdx
-	maxPos := uint32(bb.size) * 8
+// Writes decoded prediction residuals into predCoefs.
+func dynDecomp(params *agParams, bitBuf *bitBuffer, predCoefs []int32, numSamples, maxSize int) error {
+	input := bitBuf.buf[bitBuf.pos:]
+	startPos := bitBuf.bitIdx
+	maxPos := uint32(bitBuf.size) * 8
 	bitPos := startPos
 
-	mb := params.mb0
+	meanAccum := params.mb0
 	zmode := int32(0)
-	c := 0
+	count := 0
 
 	pbLocal := params.pb
 	kbLocal := params.kb
 	wbLocal := params.wb
 
-	for c < numSamples {
+	for count < numSamples {
 		if bitPos >= maxPos {
 			return errBitstreamOverrun
 		}
 
-		m := mb >> qbShift
+		m := meanAccum >> qbShift
 		k := min(lg3a(int32(m)), int32(kbLocal))
 
 		m = (1 << uint32(k)) - 1
 
-		n := dynGet32Bit(in, &bitPos, m, k, int32(maxSize))
+		residual := dynGet32Bit(input, &bitPos, m, k, int32(maxSize))
 
 		// Decode sign from LSB.
-		ndecode := n + uint32(zmode)
+		ndecode := residual + uint32(zmode)
 		multiplier := -int32(ndecode & 1)
 		multiplier |= 1
 		del := int32((ndecode+1)>>1) * multiplier
 
-		pc[c] = del
-		c++
+		predCoefs[count] = del
+		count++
 
 		// Update mean.
-		mb = pbLocal*(n+uint32(zmode)) + mb - ((pbLocal * mb) >> qbShift)
-		if n > nMaxMeanClamp {
-			mb = nMeanClampVal
+		meanAccum = pbLocal*(residual+uint32(zmode)) + meanAccum - ((pbLocal * meanAccum) >> qbShift)
+		if residual > nMaxMeanClamp {
+			meanAccum = nMeanClampVal
 		}
 
 		zmode = 0
 
 		// Check for zero run mode.
-		if (mb<<mmulShift) < qb && c < numSamples {
+		if (meanAccum<<mmulShift) < quantBits && count < numSamples {
 			zmode = 1
 
-			k32 := max(lead(int32(mb))-bitoff+int32((mb+moff)>>mdenShift), 0)
+			k32 := max(lead(int32(meanAccum))-bitoff+int32((meanAccum+moff)>>mdenShift), 0)
 
 			mz := ((uint32(1) << uint32(k32)) - 1) & wbLocal
 
-			n = dynGet(in, &bitPos, mz, uint32(k32))
+			residual = dynGet(input, &bitPos, mz, uint32(k32))
 
-			if c+int(n) > numSamples {
+			if count+int(residual) > numSamples {
 				return errSampleOverrun
 			}
 
-			for range n {
-				pc[c] = 0
-				c++
+			for range residual {
+				predCoefs[count] = 0
+				count++
 			}
 
-			if n >= 65535 {
+			if residual >= maxZeroRun {
 				zmode = 0
 			}
 
-			mb = 0
+			meanAccum = 0
 		}
 	}
 
 	bitsConsumed := bitPos - startPos
-	bb.advance(bitsConsumed)
+	bitBuf.advance(bitsConsumed)
 
 	return nil
 }

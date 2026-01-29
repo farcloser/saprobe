@@ -1,3 +1,4 @@
+//nolint:gochecknoglobals
 package tests_test
 
 import (
@@ -129,32 +130,44 @@ var mp3Configs = []codecConfig{
 }
 
 func TestFLACDecode(t *testing.T) {
+	t.Parallel()
+
 	for _, cfg := range flacConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
+			t.Parallel()
 			runSyntheticTest(t, cfg)
 		})
 	}
 }
 
 func TestALACDecode(t *testing.T) {
+	t.Parallel()
+
 	for _, cfg := range alacConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
+			t.Parallel()
 			runSyntheticTest(t, cfg)
 		})
 	}
 }
 
 func TestVorbisDecode(t *testing.T) {
+	t.Parallel()
+
 	for _, cfg := range vorbisConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
+			t.Parallel()
 			runSyntheticTest(t, cfg)
 		})
 	}
 }
 
 func TestMP3Decode(t *testing.T) {
+	t.Parallel()
+
 	for _, cfg := range mp3Configs {
 		t.Run(cfg.name, func(t *testing.T) {
+			t.Parallel()
 			runSyntheticTest(t, cfg)
 		})
 	}
@@ -341,6 +354,8 @@ func generateWhiteNoise(sampleRate, bitDepth, channels, durationSec int) []byte 
 		case 32:
 			val := int32((seed % 1800000000) - 900000000)
 			binary.LittleEndian.PutUint32(buf[offset:], uint32(val))
+
+		default:
 		}
 	}
 
@@ -356,6 +371,8 @@ func ffmpegEncode(srcPath, dstPath string, cfg codecConfig) error {
 		sampleFmt = "s24le"
 	case 32:
 		sampleFmt = "s32le"
+
+	default:
 	}
 
 	args := []string{
@@ -387,6 +404,8 @@ func ffmpegDecode(srcPath string, bitDepth int) ([]byte, error) {
 		sampleFmt = "s24le"
 	case 32:
 		sampleFmt = "s32le"
+
+	default:
 	}
 
 	cmd := exec.Command("ffmpeg",

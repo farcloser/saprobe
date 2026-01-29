@@ -2,7 +2,6 @@ package alac
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 
@@ -13,8 +12,8 @@ import (
 
 // Decode reads an M4A/MP4 stream and decodes the first ALAC audio track
 // to interleaved little-endian signed PCM bytes.
-func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
-	cookie, samples, err := findALACTrack(rs)
+func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+	cookie, samples, err := findALACTrack(reader)
 	if err != nil {
 		return nil, saprobe.PCMFormat{}, err
 	}
@@ -37,24 +36,29 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 
 	var packetBuf []byte
 
-	for i, s := range samples {
-		if int(s.size) > len(packetBuf) {
-			packetBuf = make([]byte, s.size)
+	for idx, sample := range samples {
+		if int(sample.size) > len(packetBuf) {
+			packetBuf = make([]byte, sample.size)
 		}
 
-		packet := packetBuf[:s.size]
+		packet := packetBuf[:sample.size]
 
-		if _, err := rs.Seek(int64(s.offset), io.SeekStart); err != nil {
-			return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to sample %d at offset %d: %w", i, s.offset, err)
+		if _, err := reader.Seek(int64(sample.offset), io.SeekStart); err != nil {
+			return nil, saprobe.PCMFormat{}, fmt.Errorf(
+				"seeking to sample %d at offset %d: %w",
+				idx,
+				sample.offset,
+				err,
+			)
 		}
 
-		if _, err := io.ReadFull(rs, packet); err != nil {
-			return nil, saprobe.PCMFormat{}, fmt.Errorf("reading sample %d: %w", i, err)
+		if _, err := io.ReadFull(reader, packet); err != nil {
+			return nil, saprobe.PCMFormat{}, fmt.Errorf("reading sample %d: %w", idx, err)
 		}
 
 		decoded, err := dec.DecodePacket(packet)
 		if err != nil {
-			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding packet %d: %w", i, err)
+			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding packet %d: %w", idx, err)
 		}
 
 		pcm = append(pcm, decoded...)
@@ -72,8 +76,8 @@ type sampleInfo struct {
 
 // findALACTrack walks the MP4 box tree to locate the first track containing
 // an ALAC sample entry. It returns the magic cookie and a flat sample table.
-func findALACTrack(rs io.ReadSeeker) ([]byte, []sampleInfo, error) {
-	stbls, err := mp4.ExtractBox(rs, nil, mp4.BoxPath{
+func findALACTrack(reader io.ReadSeeker) ([]byte, []sampleInfo, error) {
+	stbls, err := mp4.ExtractBox(reader, nil, mp4.BoxPath{
 		mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeMdia(),
 		mp4.BoxTypeMinf(), mp4.BoxTypeStbl(),
 	})
@@ -82,12 +86,12 @@ func findALACTrack(rs io.ReadSeeker) ([]byte, []sampleInfo, error) {
 	}
 
 	for _, stbl := range stbls {
-		cookie, err := extractCookie(rs, stbl)
+		cookie, err := extractCookie(reader, stbl)
 		if err != nil {
 			continue // not an ALAC track
 		}
 
-		samples, err := buildSampleTable(rs, stbl)
+		samples, err := buildSampleTable(reader, stbl)
 		if err != nil {
 			return nil, nil, fmt.Errorf("building sample table: %w", err)
 		}
@@ -109,8 +113,8 @@ const (
 // extractCookie reads the stsd box from stbl, finds an 'alac' sample entry,
 // and extracts the raw magic cookie (ALACSpecificConfig, possibly wrapped in
 // 'frma'+'alac' atoms which ParseConfig handles).
-func extractCookie(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]byte, error) {
-	stsds, err := mp4.ExtractBox(rs, stbl, mp4.BoxPath{mp4.BoxTypeStsd()})
+func extractCookie(reader io.ReadSeeker, stbl *mp4.BoxInfo) ([]byte, error) {
+	stsds, err := mp4.ExtractBox(reader, stbl, mp4.BoxPath{mp4.BoxTypeStsd()})
 	if err != nil || len(stsds) == 0 {
 		return nil, errNoALACTrack
 	}
@@ -119,11 +123,11 @@ func extractCookie(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]byte, error) {
 	payloadSize := int(stsd.Size - stsd.HeaderSize)
 	data := make([]byte, payloadSize)
 
-	if _, err := rs.Seek(int64(stsd.Offset+stsd.HeaderSize), io.SeekStart); err != nil {
+	if _, err := reader.Seek(int64(stsd.Offset+stsd.HeaderSize), io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seeking to stsd payload: %w", err)
 	}
 
-	if _, err := io.ReadFull(rs, data); err != nil {
+	if _, err := io.ReadFull(reader, data); err != nil {
 		return nil, fmt.Errorf("reading stsd payload: %w", err)
 	}
 
@@ -177,18 +181,18 @@ func extractCookie(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]byte, error) {
 
 // buildSampleTable constructs a flat list of sample offsets and sizes from
 // the stco/co64, stsc, and stsz boxes within the given stbl box.
-func buildSampleTable(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]sampleInfo, error) {
-	chunkOffsets, err := readChunkOffsets(rs, stbl)
+func buildSampleTable(reader io.ReadSeeker, stbl *mp4.BoxInfo) ([]sampleInfo, error) {
+	chunkOffsets, err := readChunkOffsets(reader, stbl)
 	if err != nil {
 		return nil, err
 	}
 
-	stscEntries, err := readStsc(rs, stbl)
+	stscEntries, err := readStsc(reader, stbl)
 	if err != nil {
 		return nil, err
 	}
 
-	entrySizes, constantSize, sampleCount, err := readStsz(rs, stbl)
+	entrySizes, constantSize, sampleCount, err := readStsz(reader, stbl)
 	if err != nil {
 		return nil, err
 	}
@@ -217,9 +221,9 @@ func buildSampleTable(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]sampleInfo, error)
 	return samples, nil
 }
 
-func readChunkOffsets(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]uint64, error) {
+func readChunkOffsets(reader io.ReadSeeker, stbl *mp4.BoxInfo) ([]uint64, error) {
 	// Try 32-bit stco first.
-	if boxes, err := mp4.ExtractBoxWithPayload(rs, stbl,
+	if boxes, err := mp4.ExtractBoxWithPayload(reader, stbl,
 		mp4.BoxPath{mp4.BoxTypeStco()}); err == nil && len(boxes) > 0 {
 		if stco, ok := boxes[0].Payload.(*mp4.Stco); ok {
 			offsets := make([]uint64, len(stco.ChunkOffset))
@@ -232,42 +236,43 @@ func readChunkOffsets(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]uint64, error) {
 	}
 
 	// Fall back to 64-bit co64.
-	boxes, err := mp4.ExtractBoxWithPayload(rs, stbl, mp4.BoxPath{mp4.BoxTypeCo64()})
+	boxes, err := mp4.ExtractBoxWithPayload(reader, stbl, mp4.BoxPath{mp4.BoxTypeCo64()})
 	if err != nil || len(boxes) == 0 {
-		return nil, errors.New("alac: no chunk offset box (stco/co64)")
+		return nil, errNoChunkOffset
 	}
 
 	co64, ok := boxes[0].Payload.(*mp4.Co64)
 	if !ok {
-		return nil, errors.New("alac: invalid co64 payload")
+		return nil, errInvalidCo64
 	}
 
 	return co64.ChunkOffset, nil
 }
 
-func readStsc(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]mp4.StscEntry, error) {
-	boxes, err := mp4.ExtractBoxWithPayload(rs, stbl, mp4.BoxPath{mp4.BoxTypeStsc()})
+func readStsc(reader io.ReadSeeker, stbl *mp4.BoxInfo) ([]mp4.StscEntry, error) {
+	boxes, err := mp4.ExtractBoxWithPayload(reader, stbl, mp4.BoxPath{mp4.BoxTypeStsc()})
 	if err != nil || len(boxes) == 0 {
-		return nil, errors.New("alac: no stsc box")
+		return nil, errNoStsc
 	}
 
 	stsc, ok := boxes[0].Payload.(*mp4.Stsc)
 	if !ok {
-		return nil, errors.New("alac: invalid stsc payload")
+		return nil, errInvalidStsc
 	}
 
 	return stsc.Entries, nil
 }
 
-func readStsz(rs io.ReadSeeker, stbl *mp4.BoxInfo) ([]uint32, uint32, uint32, error) {
-	boxes, err := mp4.ExtractBoxWithPayload(rs, stbl, mp4.BoxPath{mp4.BoxTypeStsz()})
+//revive:disable:function-result-limit,confusing-results
+func readStsz(reader io.ReadSeeker, stbl *mp4.BoxInfo) ([]uint32, uint32, uint32, error) {
+	boxes, err := mp4.ExtractBoxWithPayload(reader, stbl, mp4.BoxPath{mp4.BoxTypeStsz()})
 	if err != nil || len(boxes) == 0 {
-		return nil, 0, 0, errors.New("alac: no stsz box")
+		return nil, 0, 0, errNoStsz
 	}
 
 	stsz, ok := boxes[0].Payload.(*mp4.Stsz)
 	if !ok {
-		return nil, 0, 0, errors.New("alac: invalid stsz payload")
+		return nil, 0, 0, errInvalidStsz
 	}
 
 	return stsz.EntrySize, stsz.SampleSize, stsz.SampleCount, nil

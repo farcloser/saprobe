@@ -20,6 +20,7 @@ import (
 	"github.com/farcloser/saprobe/tests/testutils"
 )
 
+//nolint:gochecknoglobals
 var audioPath = flag.String("audio-path", "", "directory of audio files for mass decode comparison")
 
 // TestMassDecode walks a directory of audio files, decodes each with saprobe
@@ -27,6 +28,8 @@ var audioPath = flag.String("audio-path", "", "directory of audio files for mass
 //
 // Run: go test ./tests/ -run TestMassDecode -audio-path /path/to/audio/files.
 func TestMassDecode(t *testing.T) {
+	t.Parallel()
+
 	if *audioPath == "" {
 		t.Skip("no -audio-path flag provided")
 	}
@@ -98,6 +101,7 @@ type audioFile struct {
 	lossy     bool   // true for lossy codecs (mp3, ogg) that allow small sample differences
 }
 
+//nolint:gochecknoglobals
 var supportedExts = map[string]bool{
 	".flac": true,
 	".m4a":  true,
@@ -180,6 +184,8 @@ func probeOutputFormat(t *testing.T, path, ext string) (string, bool) {
 // files from the test's temp directory and compares them.
 // For lossless codecs, comparison is byte-for-byte.
 // For lossy codecs, small per-sample differences (±2) are tolerated.
+//
+//revive:disable:flag-parameter
 func comparePCMFiles(data test.Data, prefix string, lossy bool) test.Comparator {
 	return func(_ string, t tig.T) {
 		t.Helper()

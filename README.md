@@ -55,18 +55,17 @@ identical content for FLAC and ALAC, and within rounding errors tolerance range 
 See [QA](docs/QA.md) for more details.
 
 Tier-1:
-* FLAC and ALAC. Will be actively maintained
+* ALAC: DONE. Actively maintained
+* FLAC: DONE. Actively maintained
+* Opus: TODO. No solution right now. Accept WASM as escape hatch? Implement from scratch?
 
 Tier-2:
-* AAC: TODO. No current solution. Likely need implement from scratch.
+* AAC: TODO. No solution right now. Likely need implement from scratch.
 * DSD: TODO. Clusterfuck.
-  * Presumably need DAC capabilities detection for "purity", but decoding to 24-bit/352.8kHz PCM
-  honestly feels like it should just be fine for everybody. No Go implem. Must implement from scratch.
-  * Alternatively, DSD over PCM (dCS only?)
-  * 
+  * Presumably need DAC capabilities detection for the purists and stuff in DoP.
+  * Decoding to 24-bit/352.8kHz PCM for hardware without DoP support. No Go implem. Must implement from scratch.
 
 Tier-3:
-* MP3: here because you can't avoid it, but unlikely to receive much love (already added proper gapless support on top
+* MP3: DONE. Here because you can't avoid it, but unlikely to receive much love (already added proper gapless support on top
 of hajimehoshi/go-mp3). It just works, and the format is dead anyhow, so...
-* OggVorbis: not tested yet. Similar to MP3 situation (better format, but still dying)
-
+* OggVorbis: DONE. Barely tested (only have a few files). Similar to MP3 situation (better format, but still a dead pony)

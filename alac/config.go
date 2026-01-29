@@ -19,7 +19,10 @@ type Config struct {
 	SampleRate    uint32
 }
 
-const configSize = 24
+const (
+	configSize     = 24 // ALACSpecificConfig binary size.
+	atomHeaderSize = 12 // MPEG4 atom header: size (4) + type (4) + payload (4).
+)
 
 // ParseConfig reads an ALACSpecificConfig from a magic cookie byte slice.
 // Handles legacy wrappers ('frma' and 'alac' atoms).
@@ -27,13 +30,13 @@ func ParseConfig(cookie []byte) (Config, error) {
 	data := cookie
 
 	// Skip 'frma' atom if present: [size:4][type:'frma'][format:'alac']
-	if len(data) >= 12 && data[4] == 'f' && data[5] == 'r' && data[6] == 'm' && data[7] == 'a' {
-		data = data[12:]
+	if len(data) >= atomHeaderSize && data[4] == 'f' && data[5] == 'r' && data[6] == 'm' && data[7] == 'a' {
+		data = data[atomHeaderSize:]
 	}
 
 	// Skip 'alac' atom header if present: [size:4][type:'alac'][version:4]
-	if len(data) >= 12 && data[4] == 'a' && data[5] == 'l' && data[6] == 'a' && data[7] == 'c' {
-		data = data[12:]
+	if len(data) >= atomHeaderSize && data[4] == 'a' && data[5] == 'l' && data[6] == 'a' && data[7] == 'c' {
+		data = data[atomHeaderSize:]
 	}
 
 	if len(data) < configSize {

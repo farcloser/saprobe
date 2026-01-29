@@ -18,7 +18,15 @@ const (
 	elemEND = 7 // End of Frame
 )
 
-const maxCoefs = 32
+const (
+	maxCoefs = 32
+
+	// Special numActive value that triggers first-order delta decode mode.
+	numActiveDelta = 31
+
+	// Unused header field size in SCE/CPE (spec-defined).
+	unusedHeaderBits = 12
+)
 
 // Decoder decodes ALAC audio packets into interleaved LE signed PCM.
 type Decoder struct {
@@ -32,24 +40,24 @@ type Decoder struct {
 
 // NewDecoder creates a new ALAC decoder from the given configuration.
 func NewDecoder(config Config) (*Decoder, error) {
-	bd, err := saprobe.ToBitDepth(config.BitDepth)
+	bitDepth, err := saprobe.ToBitDepth(config.BitDepth)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errBitDepth, err)
 	}
 
-	fl := int(config.FrameLength)
+	frameLen := int(config.FrameLength)
 
 	return &Decoder{
 		config: config,
 		format: saprobe.PCMFormat{
 			SampleRate: int(config.SampleRate),
-			BitDepth:   bd,
+			BitDepth:   bitDepth,
 			Channels:   uint(config.NumChannels),
 		},
-		mixBufferU:  make([]int32, fl),
-		mixBufferV:  make([]int32, fl),
-		predictor:   make([]int32, fl),
-		shiftBuffer: make([]uint16, fl*2), // stereo worst case
+		mixBufferU:  make([]int32, frameLen),
+		mixBufferV:  make([]int32, frameLen),
+		predictor:   make([]int32, frameLen),
+		shiftBuffer: make([]uint16, frameLen*2), // stereo worst case
 	}, nil
 }
 
@@ -60,7 +68,7 @@ func (d *Decoder) Format() saprobe.PCMFormat {
 
 // DecodePacket decodes a single ALAC packet into interleaved LE signed PCM bytes.
 func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
-	bb := newBitBuffer(packet)
+	bits := newBitBuffer(packet)
 	numSamples := d.config.FrameLength
 	numChan := int(d.config.NumChannels)
 	bps := d.format.BitDepth.BytesPerSample()
@@ -70,15 +78,15 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 	output := make([]byte, int(numSamples)*numChan*bps)
 
 	for {
-		if bb.pastEnd() {
+		if bits.pastEnd() {
 			return nil, errBitstreamOverrun
 		}
 
-		tag := bb.readSmall(3)
+		tag := bits.readSmall(3)
 
 		switch tag {
 		case elemSCE, elemLFE:
-			ns, err := d.decodeSCE(bb, output, chanIdx, numChan, numSamples)
+			ns, err := d.decodeSCE(bits, output, chanIdx, numChan, numSamples)
 			if err != nil {
 				return nil, fmt.Errorf("alac: SCE/LFE decode: %w", err)
 			}
@@ -91,7 +99,7 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 				goto done
 			}
 
-			ns, err := d.decodeCPE(bb, output, chanIdx, numChan, numSamples)
+			ns, err := d.decodeCPE(bits, output, chanIdx, numChan, numSamples)
 			if err != nil {
 				return nil, fmt.Errorf("alac: CPE decode: %w", err)
 			}
@@ -103,19 +111,21 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 			return nil, errUnsupportedElement
 
 		case elemDSE:
-			if err := d.skipDSE(bb); err != nil {
+			if err := d.skipDSE(bits); err != nil {
 				return nil, err
 			}
 
 		case elemFIL:
-			if err := d.skipFIL(bb); err != nil {
+			if err := d.skipFIL(bits); err != nil {
 				return nil, err
 			}
 
 		case elemEND:
-			bb.byteAlign()
+			bits.byteAlign()
 
 			goto done
+
+		default:
 		}
 
 		if chanIdx >= numChan {
@@ -130,16 +140,16 @@ done:
 }
 
 // decodeSCE decodes a Single Channel Element (mono) or LFE element.
-func (d *Decoder) decodeSCE(bb *bitBuffer, output []byte, chanIdx, numChan int, numSamples uint32) (uint32, error) {
-	_ = bb.readSmall(4) // element instance tag
+func (d *Decoder) decodeSCE(bits *bitBuffer, output []byte, chanIdx, numChan int, numSamples uint32) (uint32, error) {
+	_ = bits.readSmall(4) // element instance tag
 
 	// 12 unused header bits (must be 0).
-	unusedHeader := bb.read(12)
+	unusedHeader := bits.read(unusedHeaderBits)
 	if unusedHeader != 0 {
 		return 0, errInvalidHeader
 	}
 
-	headerByte := bb.read(4)
+	headerByte := bits.read(4)
 	partialFrame := headerByte >> 3
 	bytesShifted := int((headerByte >> 1) & 0x3)
 
@@ -151,75 +161,78 @@ func (d *Decoder) decodeSCE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	chanBits := uint32(d.config.BitDepth) - uint32(bytesShifted)*8
 
 	if partialFrame != 0 {
-		numSamples = bb.read(16) << 16
-		numSamples |= bb.read(16)
+		numSamples = bits.read(16) << 16
+		numSamples |= bits.read(16)
 	}
 
 	if escapeFlag == 0 {
-		if err := d.decodeSCECompressed(bb, chanBits, bytesShifted, int(numSamples)); err != nil {
+		if err := d.decodeSCECompressed(bits, chanBits, bytesShifted, int(numSamples)); err != nil {
 			return 0, err
 		}
 	} else {
-		d.decodeSCEEscape(bb, chanBits, int(numSamples))
+		d.decodeSCEEscape(bits, chanBits, int(numSamples))
 
 		bytesShifted = 0
 	}
 
 	// Write output.
-	ns := int(numSamples)
+	sampleCount := int(numSamples)
 
 	switch d.config.BitDepth {
 	case 16:
-		writeMono16(output, d.mixBufferU, chanIdx, numChan, ns)
+		writeMono16(output, d.mixBufferU, chanIdx, numChan, sampleCount)
 	case 20:
-		writeMono20(output, d.mixBufferU, chanIdx, numChan, ns)
+		writeMono20(output, d.mixBufferU, chanIdx, numChan, sampleCount)
 	case 24:
-		writeMono24(output, d.mixBufferU, chanIdx, numChan, ns, d.shiftBuffer, bytesShifted)
+		writeMono24(output, d.mixBufferU, chanIdx, numChan, sampleCount, d.shiftBuffer, bytesShifted)
 	case 32:
-		writeMono32(output, d.mixBufferU, chanIdx, numChan, ns, d.shiftBuffer, bytesShifted)
+		writeMono32(output, d.mixBufferU, chanIdx, numChan, sampleCount, d.shiftBuffer, bytesShifted)
+
+	default:
+		panic(fmt.Sprintf("alac: decodeSCE called with unsupported bit depth %d", d.config.BitDepth))
 	}
 
 	return numSamples, nil
 }
 
-func (d *Decoder) decodeSCECompressed(bb *bitBuffer, chanBits uint32, bytesShifted, numSamples int) error {
-	_ = bb.read(8) // mixBits (unused for mono)
-	_ = bb.read(8) // mixRes (unused for mono)
+func (d *Decoder) decodeSCECompressed(bits *bitBuffer, chanBits uint32, bytesShifted, numSamples int) error {
+	_ = bits.read(8) // mixBits (unused for mono)
+	_ = bits.read(8) // mixRes (unused for mono)
 
-	headerByte := bb.read(8)
+	headerByte := bits.read(8)
 	modeU := headerByte >> 4
 	denShiftU := headerByte & 0xf
 
-	headerByte = bb.read(8)
+	headerByte = bits.read(8)
 	pbFactorU := headerByte >> 5
 	numU := headerByte & 0x1f
 
 	var coefsU [maxCoefs]int16
 	for i := range numU {
-		coefsU[i] = int16(bb.read(16))
+		coefsU[i] = int16(bits.read(16))
 	}
 
 	// Save shift bits position, skip past them.
 	var shiftBits bitBuffer
 	if bytesShifted != 0 {
-		shiftBits = bb.copy()
-		bb.advance(uint32(bytesShifted) * 8 * uint32(numSamples))
+		shiftBits = bits.copy()
+		bits.advance(uint32(bytesShifted) * 8 * uint32(numSamples))
 	}
 
 	// Entropy decode.
-	pb := uint32(d.config.PB)
+	predBound := uint32(d.config.PB)
 
 	var agP agParams
-	setAGParams(&agP, uint32(d.config.MB), (pb*pbFactorU)/4, uint32(d.config.KB),
+	setAGParams(&agP, uint32(d.config.MB), (predBound*pbFactorU)/4, uint32(d.config.KB),
 		uint32(numSamples), uint32(numSamples), uint32(d.config.MaxRun))
 
-	if err := dynDecomp(&agP, bb, d.predictor, numSamples, int(chanBits)); err != nil {
+	if err := dynDecomp(&agP, bits, d.predictor, numSamples, int(chanBits)); err != nil {
 		return err
 	}
 
 	// Predictor.
 	if modeU != 0 {
-		unpcBlock(d.predictor, d.predictor, numSamples, nil, 31, chanBits, 0)
+		unpcBlock(d.predictor, d.predictor, numSamples, nil, numActiveDelta, chanBits, 0)
 	}
 
 	unpcBlock(d.predictor, d.mixBufferU, numSamples, coefsU[:numU], int32(numU), chanBits, denShiftU)
@@ -235,36 +248,36 @@ func (d *Decoder) decodeSCECompressed(bb *bitBuffer, chanBits uint32, bytesShift
 	return nil
 }
 
-func (d *Decoder) decodeSCEEscape(bb *bitBuffer, chanBits uint32, numSamples int) {
+func (d *Decoder) decodeSCEEscape(bits *bitBuffer, chanBits uint32, numSamples int) {
 	shift := uint32(32) - chanBits
 
 	if chanBits <= 16 {
-		for i := range numSamples {
-			val := int32(bb.read(uint8(chanBits)))
+		for idx := range numSamples {
+			val := int32(bits.read(uint8(chanBits)))
 			val = (val << shift) >> shift
-			d.mixBufferU[i] = val
+			d.mixBufferU[idx] = val
 		}
 	} else {
 		extraBits := chanBits - 16
 
-		for i := range numSamples {
-			val := int32(bb.read(16))
+		for idx := range numSamples {
+			val := int32(bits.read(16))
 			val = (val << 16) >> shift
-			d.mixBufferU[i] = val | int32(bb.read(uint8(extraBits)))
+			d.mixBufferU[idx] = val | int32(bits.read(uint8(extraBits)))
 		}
 	}
 }
 
 // decodeCPE decodes a Channel Pair Element (stereo).
-func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, numSamples uint32) (uint32, error) {
-	_ = bb.readSmall(4) // element instance tag
+func (d *Decoder) decodeCPE(bits *bitBuffer, output []byte, chanIdx, numChan int, numSamples uint32) (uint32, error) {
+	_ = bits.readSmall(4) // element instance tag
 
-	unusedHeader := bb.read(12)
+	unusedHeader := bits.read(unusedHeaderBits)
 	if unusedHeader != 0 {
 		return 0, errInvalidHeader
 	}
 
-	headerByte := bb.read(4)
+	headerByte := bits.read(4)
 	partialFrame := headerByte >> 3
 	bytesShifted := int((headerByte >> 1) & 0x3)
 
@@ -277,8 +290,8 @@ func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	chanBits := uint32(d.config.BitDepth) - uint32(bytesShifted)*8 + 1
 
 	if partialFrame != 0 {
-		numSamples = bb.read(16) << 16
-		numSamples |= bb.read(16)
+		numSamples = bits.read(16) << 16
+		numSamples |= bits.read(16)
 	}
 
 	var mixBits, mixRes int32
@@ -286,107 +299,110 @@ func (d *Decoder) decodeCPE(bb *bitBuffer, output []byte, chanIdx, numChan int, 
 	if escapeFlag == 0 {
 		var err error
 
-		mixBits, mixRes, err = d.decodeCPECompressed(bb, chanBits, bytesShifted, int(numSamples))
+		mixBits, mixRes, err = d.decodeCPECompressed(bits, chanBits, bytesShifted, int(numSamples))
 		if err != nil {
 			return 0, err
 		}
 	} else {
 		chanBits = uint32(d.config.BitDepth) // Reset for escape.
-		d.decodeCPEEscape(bb, chanBits, int(numSamples))
+		d.decodeCPEEscape(bits, chanBits, int(numSamples))
 
 		bytesShifted = 0
 	}
 
 	// Unmix and write output.
-	ns := int(numSamples)
+	sampleCount := int(numSamples)
 
 	switch d.config.BitDepth {
 	case 16:
-		writeStereo16(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, ns, mixBits, mixRes)
+		writeStereo16(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, sampleCount, mixBits, mixRes)
 	case 20:
-		writeStereo20(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, ns, mixBits, mixRes)
+		writeStereo20(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, sampleCount, mixBits, mixRes)
 	case 24:
-		writeStereo24(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, ns,
+		writeStereo24(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, sampleCount,
 			mixBits, mixRes, d.shiftBuffer, bytesShifted)
 	case 32:
-		writeStereo32(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, ns,
+		writeStereo32(output, d.mixBufferU, d.mixBufferV, chanIdx, numChan, sampleCount,
 			mixBits, mixRes, d.shiftBuffer, bytesShifted)
+
+	default:
+		panic(fmt.Sprintf("alac: decodeCPE called with unsupported bit depth %d", d.config.BitDepth))
 	}
 
 	return numSamples, nil
 }
 
 func (d *Decoder) decodeCPECompressed(
-	bb *bitBuffer,
+	bits *bitBuffer,
 	chanBits uint32,
 	bytesShifted, numSamples int,
-) (int32, int32, error) {
-	mixBits := int32(bb.read(8))
-	mixRes := int32(int8(bb.read(8)))
+) (int32, int32, error) { //revive:disable-line:confusing-results
+	mixBits := int32(bits.read(8))
+	mixRes := int32(int8(bits.read(8)))
 
 	// Read U channel predictor params.
-	headerByte := bb.read(8)
+	headerByte := bits.read(8)
 	modeU := headerByte >> 4
 	denShiftU := headerByte & 0xf
 
-	headerByte = bb.read(8)
+	headerByte = bits.read(8)
 	pbFactorU := headerByte >> 5
 	numU := headerByte & 0x1f
 
 	var coefsU [maxCoefs]int16
 	for i := range numU {
-		coefsU[i] = int16(bb.read(16))
+		coefsU[i] = int16(bits.read(16))
 	}
 
 	// Read V channel predictor params.
-	headerByte = bb.read(8)
+	headerByte = bits.read(8)
 	modeV := headerByte >> 4
 	denShiftV := headerByte & 0xf
 
-	headerByte = bb.read(8)
+	headerByte = bits.read(8)
 	pbFactorV := headerByte >> 5
 	numV := headerByte & 0x1f
 
 	var coefsV [maxCoefs]int16
 	for i := range numV {
-		coefsV[i] = int16(bb.read(16))
+		coefsV[i] = int16(bits.read(16))
 	}
 
 	// Save shift bits position, skip past interleaved shift data.
 	var shiftBits bitBuffer
 	if bytesShifted != 0 {
-		shiftBits = bb.copy()
-		bb.advance(uint32(bytesShifted) * 8 * 2 * uint32(numSamples))
+		shiftBits = bits.copy()
+		bits.advance(uint32(bytesShifted) * 8 * 2 * uint32(numSamples))
 	}
 
-	pb := uint32(d.config.PB)
+	predBound := uint32(d.config.PB)
 
 	var agP agParams
 
 	// Decompress and predict U channel.
-	setAGParams(&agP, uint32(d.config.MB), (pb*pbFactorU)/4, uint32(d.config.KB),
+	setAGParams(&agP, uint32(d.config.MB), (predBound*pbFactorU)/4, uint32(d.config.KB),
 		uint32(numSamples), uint32(numSamples), uint32(d.config.MaxRun))
 
-	if err := dynDecomp(&agP, bb, d.predictor, numSamples, int(chanBits)); err != nil {
+	if err := dynDecomp(&agP, bits, d.predictor, numSamples, int(chanBits)); err != nil {
 		return 0, 0, err
 	}
 
 	if modeU != 0 {
-		unpcBlock(d.predictor, d.predictor, numSamples, nil, 31, chanBits, 0)
+		unpcBlock(d.predictor, d.predictor, numSamples, nil, numActiveDelta, chanBits, 0)
 	}
 
 	unpcBlock(d.predictor, d.mixBufferU, numSamples, coefsU[:numU], int32(numU), chanBits, denShiftU)
 
 	// Decompress and predict V channel.
-	setAGParams(&agP, uint32(d.config.MB), (pb*pbFactorV)/4, uint32(d.config.KB),
+	setAGParams(&agP, uint32(d.config.MB), (predBound*pbFactorV)/4, uint32(d.config.KB),
 		uint32(numSamples), uint32(numSamples), uint32(d.config.MaxRun))
 
-	if err := dynDecomp(&agP, bb, d.predictor, numSamples, int(chanBits)); err != nil {
+	if err := dynDecomp(&agP, bits, d.predictor, numSamples, int(chanBits)); err != nil {
 		return 0, 0, err
 	}
 
 	if modeV != 0 {
-		unpcBlock(d.predictor, d.predictor, numSamples, nil, 31, chanBits, 0)
+		unpcBlock(d.predictor, d.predictor, numSamples, nil, numActiveDelta, chanBits, 0)
 	}
 
 	unpcBlock(d.predictor, d.mixBufferV, numSamples, coefsV[:numV], int32(numV), chanBits, denShiftV)
@@ -403,44 +419,44 @@ func (d *Decoder) decodeCPECompressed(
 	return mixBits, mixRes, nil
 }
 
-func (d *Decoder) decodeCPEEscape(bb *bitBuffer, chanBits uint32, numSamples int) {
+func (d *Decoder) decodeCPEEscape(bits *bitBuffer, chanBits uint32, numSamples int) {
 	shift := uint32(32) - chanBits
 
 	if chanBits <= 16 {
-		for i := range numSamples {
-			val := int32(bb.read(uint8(chanBits)))
+		for idx := range numSamples {
+			val := int32(bits.read(uint8(chanBits)))
 			val = (val << shift) >> shift
-			d.mixBufferU[i] = val
+			d.mixBufferU[idx] = val
 
-			val = int32(bb.read(uint8(chanBits)))
+			val = int32(bits.read(uint8(chanBits)))
 			val = (val << shift) >> shift
-			d.mixBufferV[i] = val
+			d.mixBufferV[idx] = val
 		}
 	} else {
 		extraBits := chanBits - 16
 
-		for i := range numSamples {
-			val := int32(bb.read(16))
+		for idx := range numSamples {
+			val := int32(bits.read(16))
 			val = (val << 16) >> shift
-			d.mixBufferU[i] = val | int32(bb.read(uint8(extraBits)))
+			d.mixBufferU[idx] = val | int32(bits.read(uint8(extraBits)))
 
-			val = int32(bb.read(16))
+			val = int32(bits.read(16))
 			val = (val << 16) >> shift
-			d.mixBufferV[i] = val | int32(bb.read(uint8(extraBits)))
+			d.mixBufferV[idx] = val | int32(bits.read(uint8(extraBits)))
 		}
 	}
 }
 
 // skipFIL skips a Fill Element.
-func (d *Decoder) skipFIL(bb *bitBuffer) error {
-	count := int16(bb.readSmall(4))
-	if count == 15 {
-		count += int16(bb.readSmall(8)) - 1
+func (*Decoder) skipFIL(bits *bitBuffer) error {
+	count := int16(bits.readSmall(4))
+	if count == 15 { //revive:disable-line:add-constant
+		count += int16(bits.readSmall(8)) - 1
 	}
 
-	bb.advance(uint32(count) * 8)
+	bits.advance(uint32(count) * 8)
 
-	if bb.pastEnd() {
+	if bits.pastEnd() {
 		return errBitstreamOverrun
 	}
 
@@ -448,22 +464,22 @@ func (d *Decoder) skipFIL(bb *bitBuffer) error {
 }
 
 // skipDSE skips a Data Stream Element.
-func (d *Decoder) skipDSE(bb *bitBuffer) error {
-	_ = bb.readSmall(4) // element instance tag
-	dataByteAlignFlag := bb.readOne()
+func (*Decoder) skipDSE(bits *bitBuffer) error {
+	_ = bits.readSmall(4) // element instance tag
+	dataByteAlignFlag := bits.readOne()
 
-	count := uint16(bb.readSmall(8))
-	if count == 255 {
-		count += uint16(bb.readSmall(8))
+	count := uint16(bits.readSmall(8))
+	if count == 255 { //revive:disable-line:add-constant
+		count += uint16(bits.readSmall(8))
 	}
 
 	if dataByteAlignFlag != 0 {
-		bb.byteAlign()
+		bits.byteAlign()
 	}
 
-	bb.advance(uint32(count) * 8)
+	bits.advance(uint32(count) * 8)
 
-	if bb.pastEnd() {
+	if bits.pastEnd() {
 		return errBitstreamOverrun
 	}
 

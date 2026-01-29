@@ -157,6 +157,10 @@ linters:
 
   exclusions:
     rules:
+      - path: alac/
+        text: "G115"
+        linters:
+          - gosec
       - path: testutil/
         linters:
           - gosec
@@ -233,7 +237,7 @@ linters:
           arguments: [100, 0]
         - name: add-constant
           arguments:
-            - allowInts: "0,1,2,3,4,-1"
+            - allowInts: "0,1,2,3,4,5,6,7,8,9,-1,16,20,24,32,0xf,0x1f,0x3,0x1,0xFF,0xE0,0x03,0x0F,0x00"
               allowStrs: '"","%w: %q","%w: %w","%w: %s"," ","-","`","\n",":","@",".","%s:%s"'
               ignoreFuncs: 'slog[.].*'
         - name: cognitive-complexity

@@ -7,7 +7,7 @@ package alac
 func signOfInt(val int32) int32 {
 	negiShift := int32(uint32(-val) >> 31)
 
-	return negiShift | (val >> 31)
+	return negiShift | (val >> 31) //revive:disable-line:add-constant
 }
 
 // unpcBlock reverses the linear prediction encoding.
@@ -32,22 +32,22 @@ func unpcBlock(pc1, out []int32, num int, coefs []int16, numActive int32, chanBi
 		return
 	}
 
-	if numActive == 31 {
+	if numActive == numActiveDelta {
 		// Simple first-order delta decode.
 		prev := out[0]
-		for j := 1; j < num; j++ {
-			del := pc1[j] + prev
+		for idx := 1; idx < num; idx++ {
+			del := pc1[idx] + prev
 			prev = (del << chanShift) >> chanShift
-			out[j] = prev
+			out[idx] = prev
 		}
 
 		return
 	}
 
 	// Warm-up phase: build predictor with growing coefficient set.
-	for j := 1; j <= int(numActive); j++ {
-		del := pc1[j] + out[j-1]
-		out[j] = (del << chanShift) >> chanShift
+	for idx := 1; idx <= int(numActive); idx++ {
+		del := pc1[idx] + out[idx-1]
+		out[idx] = (del << chanShift) >> chanShift
 	}
 
 	lim := int(numActive) + 1
@@ -63,253 +63,257 @@ func unpcBlock(pc1, out []int32, num int, coefs []int16, numActive int32, chanBi
 }
 
 // unpcBlock4 is the optimized predictor for numActive == 4.
+//
+//revive:disable:argument-limit
 func unpcBlock4(pc1, out []int32, num int, coefs []int16, lim int, chanShift, denShift uint32, denHalf int32) {
-	a0 := int32(coefs[0])
-	a1 := int32(coefs[1])
-	a2 := int32(coefs[2])
-	a3 := int32(coefs[3])
+	coef0 := int32(coefs[0])
+	coef1 := int32(coefs[1])
+	coef2 := int32(coefs[2])
+	coef3 := int32(coefs[3])
 
-	for j := lim; j < num; j++ {
-		top := out[j-lim]
+	for idx := lim; idx < num; idx++ {
+		top := out[idx-lim]
 
-		b0 := top - out[j-1]
-		b1 := top - out[j-2]
-		b2 := top - out[j-3]
-		b3 := top - out[j-4]
+		diff0 := top - out[idx-1]
+		diff1 := top - out[idx-2]
+		diff2 := top - out[idx-3]
+		diff3 := top - out[idx-4]
 
-		sum1 := (denHalf - a0*b0 - a1*b1 - a2*b2 - a3*b3) >> denShift
+		sum1 := (denHalf - coef0*diff0 - coef1*diff1 - coef2*diff2 - coef3*diff3) >> denShift
 
-		del := pc1[j]
+		del := pc1[idx]
 		del0 := del
-		sg := signOfInt(del)
+		sign := signOfInt(del)
 		del += top + sum1
 
-		out[j] = (del << chanShift) >> chanShift
+		out[idx] = (del << chanShift) >> chanShift
 
-		if sg > 0 {
-			sgn := signOfInt(b3)
-			a3 -= int32(int16(sgn))
+		if sign > 0 {
+			sgn := signOfInt(diff3)
+			coef3 -= int32(int16(sgn))
 
-			del0 -= 1 * ((sgn * b3) >> denShift)
+			del0 -= 1 * ((sgn * diff3) >> denShift)
 			if del0 <= 0 {
 				goto store4
 			}
 
-			sgn = signOfInt(b2)
-			a2 -= int32(int16(sgn))
+			sgn = signOfInt(diff2)
+			coef2 -= int32(int16(sgn))
 
-			del0 -= 2 * ((sgn * b2) >> denShift)
+			del0 -= 2 * ((sgn * diff2) >> denShift)
 			if del0 <= 0 {
 				goto store4
 			}
 
-			sgn = signOfInt(b1)
-			a1 -= int32(int16(sgn))
+			sgn = signOfInt(diff1)
+			coef1 -= int32(int16(sgn))
 
-			del0 -= 3 * ((sgn * b1) >> denShift)
+			del0 -= 3 * ((sgn * diff1) >> denShift)
 			if del0 <= 0 {
 				goto store4
 			}
 
-			a0 -= int32(int16(signOfInt(b0)))
-		} else if sg < 0 {
-			sgn := -signOfInt(b3)
-			a3 -= int32(int16(sgn))
+			coef0 -= int32(int16(signOfInt(diff0)))
+		} else if sign < 0 {
+			sgn := -signOfInt(diff3)
+			coef3 -= int32(int16(sgn))
 
-			del0 -= 1 * ((sgn * b3) >> denShift)
+			del0 -= 1 * ((sgn * diff3) >> denShift)
 			if del0 >= 0 {
 				goto store4
 			}
 
-			sgn = -signOfInt(b2)
-			a2 -= int32(int16(sgn))
+			sgn = -signOfInt(diff2)
+			coef2 -= int32(int16(sgn))
 
-			del0 -= 2 * ((sgn * b2) >> denShift)
+			del0 -= 2 * ((sgn * diff2) >> denShift)
 			if del0 >= 0 {
 				goto store4
 			}
 
-			sgn = -signOfInt(b1)
-			a1 -= int32(int16(sgn))
+			sgn = -signOfInt(diff1)
+			coef1 -= int32(int16(sgn))
 
-			del0 -= 3 * ((sgn * b1) >> denShift)
+			del0 -= 3 * ((sgn * diff1) >> denShift)
 			if del0 >= 0 {
 				goto store4
 			}
 
-			a0 += int32(int16(signOfInt(b0)))
+			coef0 += int32(int16(signOfInt(diff0)))
 		}
 
 	store4:
 	}
 
-	coefs[0] = int16(a0)
-	coefs[1] = int16(a1)
-	coefs[2] = int16(a2)
-	coefs[3] = int16(a3)
+	coefs[0] = int16(coef0)
+	coefs[1] = int16(coef1)
+	coefs[2] = int16(coef2)
+	coefs[3] = int16(coef3)
 }
 
 // unpcBlock8 is the optimized predictor for numActive == 8.
+//
+//revive:disable:cognitive-complexity // deal with it!
 func unpcBlock8(pc1, out []int32, num int, coefs []int16, lim int, chanShift, denShift uint32, denHalf int32) {
-	a0 := int32(coefs[0])
-	a1 := int32(coefs[1])
-	a2 := int32(coefs[2])
-	a3 := int32(coefs[3])
-	a4 := int32(coefs[4])
-	a5 := int32(coefs[5])
-	a6 := int32(coefs[6])
-	a7 := int32(coefs[7])
+	coef0 := int32(coefs[0])
+	coef1 := int32(coefs[1])
+	coef2 := int32(coefs[2])
+	coef3 := int32(coefs[3])
+	coef4 := int32(coefs[4])
+	coef5 := int32(coefs[5])
+	coef6 := int32(coefs[6])
+	coef7 := int32(coefs[7])
 
-	for j := lim; j < num; j++ {
-		top := out[j-lim]
+	for idx := lim; idx < num; idx++ {
+		top := out[idx-lim]
 
-		b0 := top - out[j-1]
-		b1 := top - out[j-2]
-		b2 := top - out[j-3]
-		b3 := top - out[j-4]
-		b4 := top - out[j-5]
-		b5 := top - out[j-6]
-		b6 := top - out[j-7]
-		b7 := top - out[j-8]
+		diff0 := top - out[idx-1]
+		diff1 := top - out[idx-2]
+		diff2 := top - out[idx-3]
+		diff3 := top - out[idx-4]
+		diff4 := top - out[idx-5]
+		diff5 := top - out[idx-6]
+		diff6 := top - out[idx-7]
+		diff7 := top - out[idx-8]
 
-		sum1 := (denHalf - a0*b0 - a1*b1 - a2*b2 - a3*b3 - a4*b4 - a5*b5 - a6*b6 - a7*b7) >> denShift
+		sum1 := (denHalf - coef0*diff0 - coef1*diff1 - coef2*diff2 - coef3*diff3 - coef4*diff4 - coef5*diff5 - coef6*diff6 - coef7*diff7) >> denShift
 
-		del := pc1[j]
+		del := pc1[idx]
 		del0 := del
-		sg := signOfInt(del)
+		sign := signOfInt(del)
 		del += top + sum1
 
-		out[j] = (del << chanShift) >> chanShift
+		out[idx] = (del << chanShift) >> chanShift
 
-		if sg > 0 {
-			sgn := signOfInt(b7)
-			a7 -= int32(int16(sgn))
+		if sign > 0 {
+			sgn := signOfInt(diff7)
+			coef7 -= int32(int16(sgn))
 
-			del0 -= 1 * ((sgn * b7) >> denShift)
+			del0 -= 1 * ((sgn * diff7) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b6)
-			a6 -= int32(int16(sgn))
+			sgn = signOfInt(diff6)
+			coef6 -= int32(int16(sgn))
 
-			del0 -= 2 * ((sgn * b6) >> denShift)
+			del0 -= 2 * ((sgn * diff6) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b5)
-			a5 -= int32(int16(sgn))
+			sgn = signOfInt(diff5)
+			coef5 -= int32(int16(sgn))
 
-			del0 -= 3 * ((sgn * b5) >> denShift)
+			del0 -= 3 * ((sgn * diff5) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b4)
-			a4 -= int32(int16(sgn))
+			sgn = signOfInt(diff4)
+			coef4 -= int32(int16(sgn))
 
-			del0 -= 4 * ((sgn * b4) >> denShift)
+			del0 -= 4 * ((sgn * diff4) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b3)
-			a3 -= int32(int16(sgn))
+			sgn = signOfInt(diff3)
+			coef3 -= int32(int16(sgn))
 
-			del0 -= 5 * ((sgn * b3) >> denShift)
+			del0 -= 5 * ((sgn * diff3) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b2)
-			a2 -= int32(int16(sgn))
+			sgn = signOfInt(diff2)
+			coef2 -= int32(int16(sgn))
 
-			del0 -= 6 * ((sgn * b2) >> denShift)
+			del0 -= 6 * ((sgn * diff2) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			sgn = signOfInt(b1)
-			a1 -= int32(int16(sgn))
+			sgn = signOfInt(diff1)
+			coef1 -= int32(int16(sgn))
 
-			del0 -= 7 * ((sgn * b1) >> denShift)
+			del0 -= 7 * ((sgn * diff1) >> denShift)
 			if del0 <= 0 {
 				goto store8
 			}
 
-			a0 -= int32(int16(signOfInt(b0)))
-		} else if sg < 0 {
-			sgn := -signOfInt(b7)
-			a7 -= int32(int16(sgn))
+			coef0 -= int32(int16(signOfInt(diff0)))
+		} else if sign < 0 {
+			sgn := -signOfInt(diff7)
+			coef7 -= int32(int16(sgn))
 
-			del0 -= 1 * ((sgn * b7) >> denShift)
+			del0 -= 1 * ((sgn * diff7) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b6)
-			a6 -= int32(int16(sgn))
+			sgn = -signOfInt(diff6)
+			coef6 -= int32(int16(sgn))
 
-			del0 -= 2 * ((sgn * b6) >> denShift)
+			del0 -= 2 * ((sgn * diff6) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b5)
-			a5 -= int32(int16(sgn))
+			sgn = -signOfInt(diff5)
+			coef5 -= int32(int16(sgn))
 
-			del0 -= 3 * ((sgn * b5) >> denShift)
+			del0 -= 3 * ((sgn * diff5) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b4)
-			a4 -= int32(int16(sgn))
+			sgn = -signOfInt(diff4)
+			coef4 -= int32(int16(sgn))
 
-			del0 -= 4 * ((sgn * b4) >> denShift)
+			del0 -= 4 * ((sgn * diff4) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b3)
-			a3 -= int32(int16(sgn))
+			sgn = -signOfInt(diff3)
+			coef3 -= int32(int16(sgn))
 
-			del0 -= 5 * ((sgn * b3) >> denShift)
+			del0 -= 5 * ((sgn * diff3) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b2)
-			a2 -= int32(int16(sgn))
+			sgn = -signOfInt(diff2)
+			coef2 -= int32(int16(sgn))
 
-			del0 -= 6 * ((sgn * b2) >> denShift)
+			del0 -= 6 * ((sgn * diff2) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			sgn = -signOfInt(b1)
-			a1 -= int32(int16(sgn))
+			sgn = -signOfInt(diff1)
+			coef1 -= int32(int16(sgn))
 
-			del0 -= 7 * ((sgn * b1) >> denShift)
+			del0 -= 7 * ((sgn * diff1) >> denShift)
 			if del0 >= 0 {
 				goto store8
 			}
 
-			a0 += int32(int16(signOfInt(b0)))
+			coef0 += int32(int16(signOfInt(diff0)))
 		}
 
 	store8:
 	}
 
-	coefs[0] = int16(a0)
-	coefs[1] = int16(a1)
-	coefs[2] = int16(a2)
-	coefs[3] = int16(a3)
-	coefs[4] = int16(a4)
-	coefs[5] = int16(a5)
-	coefs[6] = int16(a6)
-	coefs[7] = int16(a7)
+	coefs[0] = int16(coef0)
+	coefs[1] = int16(coef1)
+	coefs[2] = int16(coef2)
+	coefs[3] = int16(coef3)
+	coefs[4] = int16(coef4)
+	coefs[5] = int16(coef5)
+	coefs[6] = int16(coef6)
+	coefs[7] = int16(coef7)
 }
 
 // unpcBlockGeneral is the general predictor for any numActive.
@@ -322,24 +326,24 @@ func unpcBlockGeneral(
 	chanShift, denShift uint32,
 	denHalf int32,
 ) {
-	for j := lim; j < num; j++ {
+	for idx := lim; idx < num; idx++ {
 		var sum1 int32
 
-		top := out[j-lim]
+		top := out[idx-lim]
 
 		for k := range numActive {
-			sum1 += int32(coefs[k]) * (out[j-1-int(k)] - top)
+			sum1 += int32(coefs[k]) * (out[idx-1-int(k)] - top)
 		}
 
-		del := pc1[j]
+		del := pc1[idx]
 		del0 := del
-		sg := signOfInt(del)
+		sign := signOfInt(del)
 		del += top + ((sum1 + denHalf) >> denShift)
-		out[j] = (del << chanShift) >> chanShift
+		out[idx] = (del << chanShift) >> chanShift
 
-		if sg > 0 {
+		if sign > 0 {
 			for k := numActive - 1; k >= 0; k-- {
-				dd := top - out[j-1-int(k)]
+				dd := top - out[idx-1-int(k)]
 				sgn := signOfInt(dd)
 				coefs[k] -= int16(sgn)
 
@@ -348,9 +352,9 @@ func unpcBlockGeneral(
 					break
 				}
 			}
-		} else if sg < 0 {
+		} else if sign < 0 {
 			for k := numActive - 1; k >= 0; k-- {
-				dd := top - out[j-1-int(k)]
+				dd := top - out[idx-1-int(k)]
 				sgn := signOfInt(dd)
 				coefs[k] += int16(sgn)
 

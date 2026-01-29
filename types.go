@@ -1,4 +1,3 @@
-// Package saprobe provides pure-Go audio decoders for lossless and lossy formats.
 package saprobe
 
 import (
@@ -28,7 +27,7 @@ func (d BitDepth) BytesPerSample() int {
 	case Depth32:
 		return 4
 	default:
-		return 0
+		panic(fmt.Sprintf("saprobe: BytesPerSample called with unsupported bit depth %d", d))
 	}
 }
 

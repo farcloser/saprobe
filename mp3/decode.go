@@ -1,4 +1,3 @@
-// Package mp3 decodes MP3 audio to raw PCM using a pure-Go decoder.
 package mp3
 
 import (
@@ -27,6 +26,60 @@ const (
 	decoderDelay = 529
 )
 
+// MPEG version identifiers (2-bit field in frame header).
+const (
+	mpegVersion25   = 0x00 // MPEG 2.5
+	mpegVersionRsvd = 0x01 // Reserved (invalid)
+	mpegVersion2    = 0x02 // MPEG 2
+	mpegVersion1    = 0x03 // MPEG 1
+	channelModeMono = 0x03 // Mono channel mode
+)
+
+// MPEG side information sizes (bytes).
+const (
+	sideInfoMPEG1Stereo = 32
+	sideInfoMPEG1Mono   = 17
+	sideInfoMPEG2Stereo = 17
+	sideInfoMPEG2Mono   = 9
+)
+
+// XING header layout.
+const (
+	xingPreambleSize = 8    // "Xing"/"Info" tag (4) + flags (4).
+	xingFlagFrames   = 0x01 // Frame count field present (4 bytes).
+	xingFlagBytes    = 0x02 // Byte count field present (4 bytes).
+	xingFlagTOC      = 0x04 // Table of contents present (100 bytes).
+	xingFlagQuality  = 0x08 // Quality indicator present (4 bytes).
+	xingTOCSize      = 100  // TOC is always 100 bytes.
+)
+
+// LAME tag layout.
+const (
+	lameTagMinSize     = 24    // Minimum bytes for a valid LAME tag.
+	lameGaplessOffset  = 21    // Offset of gapless info within LAME tag.
+	gaplessFieldBits   = 12    // Each gapless field (delay/padding) is 12 bits.
+	gaplessPaddingMask = 0xFFF // 12-bit mask for gapless padding field.
+)
+
+// ID3v2 constants.
+const (
+	id3v2HeaderSize = 10 // ID3v2 header: "ID3" (3) + version (2) + flags (1) + size (4).
+)
+
+// Parsing thresholds.
+const (
+	headerBufSize   = 4096 // Buffer size for reading first MPEG frame.
+	minHeaderBytes  = 256  // Minimum bytes needed to find a valid frame header.
+	minXINGPlusLAME = 120  // Minimum bytes from XING offset for XING+LAME headers.
+	encoderTagLen   = 9    // Length to check for printable encoder tag.
+)
+
+// Printable ASCII range.
+const (
+	printableASCIIMin = 0x20
+	printableASCIIMax = 0x7E
+)
+
 // gaplessInfo contains encoder delay and padding from LAME header.
 type gaplessInfo struct {
 	delay      int  // samples to skip at start (LAME encoder delay)
@@ -37,16 +90,16 @@ type gaplessInfo struct {
 // Decode reads an MP3 stream and decodes it to interleaved little-endian signed 16-bit PCM bytes.
 // The output is always stereo (2 channels) at the source sample rate.
 // If the file contains LAME gapless metadata, encoder delay and padding are trimmed automatically.
-func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 	// Parse gapless info before decoding.
-	gapless := parseGaplessInfo(rs)
+	gapless := parseGaplessInfo(reader)
 
 	// Seek back to start for decoding.
-	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to start: %w", err)
 	}
 
-	decoder, err := gomp3.NewDecoder(rs)
+	decoder, err := gomp3.NewDecoder(reader)
 	if err != nil {
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("creating mp3 decoder: %w", err)
 	}
@@ -118,22 +171,22 @@ func applyGaplessTrimming(buf []byte, info gaplessInfo) []byte {
 
 // parseGaplessInfo attempts to extract LAME encoder delay and padding from the MP3 file.
 // Returns zero values if no LAME header is found.
-func parseGaplessInfo(rs io.ReadSeeker) gaplessInfo {
+func parseGaplessInfo(reader io.ReadSeeker) gaplessInfo {
 	// Skip ID3v2 tag if present (can be very large, 100KB+).
-	id3Size := skipID3v2(rs)
+	id3Size := skipID3v2(reader)
 	if id3Size < 0 {
 		return gaplessInfo{}
 	}
 
 	// Read enough bytes to find XING/LAME header (first frame is typically < 2KB).
-	header := make([]byte, 4096)
-	n, err := rs.Read(header)
+	header := make([]byte, headerBufSize)
+	bytesRead, err := reader.Read(header)
 
-	if err != nil || n < 256 {
+	if err != nil || bytesRead < minHeaderBytes {
 		return gaplessInfo{}
 	}
 
-	header = header[:n]
+	header = header[:bytesRead]
 
 	// Find first MPEG sync word.
 	syncPos := findSyncWord(header)
@@ -151,7 +204,7 @@ func parseGaplessInfo(rs io.ReadSeeker) gaplessInfo {
 
 	// XING header starts after frame header (4 bytes) + side info.
 	xingOffset := syncPos + 4 + sideInfoSize
-	if xingOffset+120 > len(header) {
+	if xingOffset+minXINGPlusLAME > len(header) {
 		return gaplessInfo{}
 	}
 
@@ -167,7 +220,7 @@ func parseGaplessInfo(rs io.ReadSeeker) gaplessInfo {
 	// Parse XING header to find LAME tag offset.
 	// XING structure: "Xing" (4) + flags (4) + optional fields based on flags.
 	lameOffset := findLAMETag(xingData)
-	if lameOffset < 0 || lameOffset+24 > len(xingData) {
+	if lameOffset < 0 || lameOffset+lameTagMinSize > len(xingData) {
 		// XING present but no LAME tag - still need to skip the XING frame.
 		return gaplessInfo{hasXINGTag: hasXING}
 	}
@@ -175,16 +228,16 @@ func parseGaplessInfo(rs io.ReadSeeker) gaplessInfo {
 	// LAME tag structure: "LAME" (4) + version (5) + ... + gapless info at offset 21-23.
 	// Gapless info: 24 bits = 12-bit delay + 12-bit padding.
 	lameData := xingData[lameOffset:]
-	if len(lameData) < 24 {
+	if len(lameData) < lameTagMinSize {
 		return gaplessInfo{hasXINGTag: hasXING}
 	}
 
 	// Gapless bytes are at offset 21 from LAME tag start.
-	gaplessBytes := lameData[21:24]
+	gaplessBytes := lameData[lameGaplessOffset:lameTagMinSize]
 	gapless24 := uint32(gaplessBytes[0])<<16 | uint32(gaplessBytes[1])<<8 | uint32(gaplessBytes[2])
 
-	delay := int(gapless24 >> 12)
-	padding := int(gapless24 & 0xFFF)
+	delay := int(gapless24 >> gaplessFieldBits)
+	padding := int(gapless24 & gaplessPaddingMask)
 
 	return gaplessInfo{
 		delay:      delay,
@@ -195,34 +248,39 @@ func parseGaplessInfo(rs io.ReadSeeker) gaplessInfo {
 
 // skipID3v2 skips past any ID3v2 tag at the start of the file.
 // Returns the size of the tag (0 if none), or -1 on error.
-func skipID3v2(rs io.ReadSeeker) int {
+func skipID3v2(reader io.ReadSeeker) int {
 	// ID3v2 header: "ID3" (3 bytes) + version (2) + flags (1) + size (4, syncsafe)
-	header := make([]byte, 10)
-	n, err := rs.Read(header)
+	header := make([]byte, id3v2HeaderSize)
+	bytesRead, err := reader.Read(header)
 
-	if err != nil || n < 10 {
+	if err != nil || bytesRead < id3v2HeaderSize {
 		// No ID3v2 tag or read error - seek back and continue.
-		_, _ = rs.Seek(0, io.SeekStart)
+		_, _ = reader.Seek(0, io.SeekStart)
 
 		return 0
 	}
 
 	// Check for "ID3" signature.
+	//nolint:gosec // G602: bounds guaranteed by bytesRead < 10 guard above.
 	if header[0] != 'I' || header[1] != 'D' || header[2] != '3' {
 		// No ID3v2 tag - seek back to start.
-		_, _ = rs.Seek(0, io.SeekStart)
+		_, _ = reader.Seek(0, io.SeekStart)
 
 		return 0
 	}
 
 	// Parse syncsafe size (4 bytes, 7 bits each).
-	size := (int(header[6]) << 21) | (int(header[7]) << 14) | (int(header[8]) << 7) | int(header[9])
+	//nolint:gosec // Bounds guaranteed by bytesRead < 10 guard above.
+	//revive:disable-next-line:add-constant
+	size := (int(header[6]) << 21) | (int(header[7]) << 14) | (int(header[8]) << 7) | int(
+		header[9],
+	)
 
-	// Total tag size = header (10 bytes) + size.
-	totalSize := 10 + size
+	// Total tag size = header + size.
+	totalSize := id3v2HeaderSize + size
 
 	// Seek past the ID3v2 tag.
-	if _, err := rs.Seek(int64(totalSize), io.SeekStart); err != nil {
+	if _, err := reader.Seek(int64(totalSize), io.SeekStart); err != nil {
 		return -1
 	}
 
@@ -260,7 +318,7 @@ func isValidFrameHeader(header []byte) bool {
 	bitrateBits := (header[2] >> 4) & 0x0F
 
 	// Version 01 is reserved.
-	if versionBits == 0x01 {
+	if versionBits == mpegVersionRsvd {
 		return false
 	}
 
@@ -287,22 +345,22 @@ func getSideInfoSize(header []byte) int {
 	versionBits := (header[1] >> 3) & 0x03
 	channelBits := (header[3] >> 6) & 0x03
 
-	isMono := channelBits == 0x03
+	isMono := channelBits == channelModeMono
 
 	// MPEG version: 00=2.5, 01=reserved, 10=2, 11=1.
 	switch versionBits {
-	case 0x03: // MPEG1
+	case mpegVersion1:
 		if isMono {
-			return 17
+			return sideInfoMPEG1Mono
 		}
 
-		return 32
-	case 0x02, 0x00: // MPEG2 or MPEG2.5
+		return sideInfoMPEG1Stereo
+	case mpegVersion2, mpegVersion25:
 		if isMono {
-			return 9
+			return sideInfoMPEG2Mono
 		}
 
-		return 17
+		return sideInfoMPEG2Stereo
 	default:
 		return -1
 	}
@@ -318,27 +376,27 @@ func findLAMETag(xingData []byte) int {
 	//   bit 2: TOC (100 bytes)
 	//   bit 3: quality (4 bytes)
 	// LAME tag follows immediately after XING optional fields.
-	if len(xingData) < 8 {
+	if len(xingData) < xingPreambleSize {
 		return -1
 	}
 
-	flags := binary.BigEndian.Uint32(xingData[4:8])
-	offset := 8 // Start after "Xing" + flags.
+	flags := binary.BigEndian.Uint32(xingData[4:xingPreambleSize])
+	offset := xingPreambleSize // Start after "Xing" + flags.
 
 	// Skip optional fields based on flags.
-	if flags&0x01 != 0 {
+	if flags&xingFlagFrames != 0 {
 		offset += 4 // frames
 	}
 
-	if flags&0x02 != 0 {
+	if flags&xingFlagBytes != 0 {
 		offset += 4 // bytes
 	}
 
-	if flags&0x04 != 0 {
-		offset += 100 // TOC
+	if flags&xingFlagTOC != 0 {
+		offset += xingTOCSize
 	}
 
-	if flags&0x08 != 0 {
+	if flags&xingFlagQuality != 0 {
 		offset += 4 // quality
 	}
 
@@ -354,7 +412,7 @@ func findLAMETag(xingData []byte) int {
 	// Some encoders use different tags (Lavf, Lavc, etc.) with same structure.
 	// Check if there's encoder info at this position anyway.
 	// Look for printable ASCII which would indicate an encoder tag.
-	if offset+9 <= len(xingData) {
+	if offset+encoderTagLen <= len(xingData) {
 		tag := xingData[offset : offset+4]
 		if isPrintableASCII(tag) {
 			return offset
@@ -367,7 +425,7 @@ func findLAMETag(xingData []byte) int {
 // isPrintableASCII checks if all bytes are printable ASCII characters.
 func isPrintableASCII(data []byte) bool {
 	for _, b := range data {
-		if b < 0x20 || b > 0x7E {
+		if b < printableASCIIMin || b > printableASCIIMax {
 			return false
 		}
 	}
