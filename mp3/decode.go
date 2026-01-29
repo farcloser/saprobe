@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	gomp3 "github.com/hajimehoshi/go-mp3"
+	gomp3 "github.com/farcloser/saprobe/third-party/go-mp3"
 
 	"github.com/farcloser/saprobe"
 )

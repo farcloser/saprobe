@@ -33,7 +33,7 @@ go test -timeout 3h ./tests/ -run TestMassDecode -audio-path  /Volumes/Anisotope
 ALAC: 107
 FLAC: 0
 MP3: 2905
-Time: 
+Time: 14935.919s
 ```
 
 100% success.
