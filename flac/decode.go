@@ -80,6 +80,13 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 	pos := 0
 
 	switch depth {
+	case saprobe.Depth8:
+		for i := range blockSize {
+			for ch := range nChannels {
+				dst[pos] = byte(int8(subframes[ch].Samples[i])) //nolint:gosec // Intentional int32-to-int8 truncation.
+				pos++
+			}
+		}
 	case saprobe.Depth16:
 		for i := range blockSize {
 			for ch := range nChannels {

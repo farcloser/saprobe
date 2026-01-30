@@ -10,6 +10,7 @@ type BitDepth uint
 
 // Standard PCM bit depths.
 const (
+	Depth8  BitDepth = 8
 	Depth16 BitDepth = 16
 	Depth20 BitDepth = 20
 	Depth24 BitDepth = 24
@@ -20,6 +21,8 @@ const (
 // 20-bit samples are stored in 3 bytes (left-aligned in 24-bit).
 func (d BitDepth) BytesPerSample() int {
 	switch d {
+	case Depth8:
+		return 1
 	case Depth16:
 		return 2
 	case Depth20, Depth24:
@@ -43,6 +46,8 @@ var errUnsupportedBitDepth = errors.New("unsupported bit depth")
 // ToBitDepth converts a numeric bit depth to the BitDepth type.
 func ToBitDepth(bps uint8) (BitDepth, error) {
 	switch BitDepth(bps) {
+	case Depth8:
+		return Depth8, nil
 	case Depth16:
 		return Depth16, nil
 	case Depth20:
