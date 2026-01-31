@@ -1,4 +1,4 @@
-module github.com/farcloser/saprobe
+module github.com/mycophonic/saprobe
 
 go 1.25.6
 
@@ -6,9 +6,9 @@ require (
 	github.com/abema/go-mp4 v1.4.1
 	// Testing
 	github.com/containerd/nerdctl/mod/tigron v0.0.0-20260121031139-a630881afd01
-	github.com/farcloser/agar v0.0.0-20260129015059-fcda423fe291
+	github.com/mycophonic/agar v0.0.0-20260129015059-fcda423fe291
 	// Runtime
-	github.com/farcloser/primordium v0.0.0-20260129020312-51a7a6cb1992
+	github.com/mycophonic/primordium v0.0.0-20260131012359-6fb57c904cec
 	github.com/hajimehoshi/oto/v2 v2.4.3
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mewkiz/flac v1.0.13
@@ -16,7 +16,7 @@ require (
 	github.com/urfave/cli/v3 v3.6.2
 )
 
-replace github.com/mewkiz/flac => github.com/farcloser/flac v0.0.0-20250818164710-f26319f6afb6
+replace github.com/mewkiz/flac => github.com/mycophonic/flac v0.0.0-20260130024915-97b8621e14d3
 
 require (
 	github.com/creack/pty v1.1.24 // indirect

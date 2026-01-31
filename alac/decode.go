@@ -7,7 +7,7 @@ import (
 
 	mp4 "github.com/abema/go-mp4"
 
-	"github.com/farcloser/saprobe"
+	"github.com/mycophonic/saprobe"
 )
 
 // Decode reads an M4A/MP4 stream and decodes the first ALAC audio track

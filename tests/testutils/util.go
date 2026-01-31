@@ -6,7 +6,7 @@ import (
 
 	"github.com/containerd/nerdctl/mod/tigron/test"
 
-	"github.com/farcloser/agar/pkg/agar"
+	"github.com/mycophonic/agar/pkg/agar"
 )
 
 func projectRoot() string {

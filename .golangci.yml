@@ -266,9 +266,9 @@ linters:
             - $all
           allow:
             - $gostd
-            - github.com/farcloser/saprobe
-            - github.com/farcloser/primordium
-            - github.com/farcloser/agar
+            - github.com/mycophonic/saprobe
+            - github.com/mycophonic/primordium
+            - github.com/mycophonic/agar
             - github.com/containerd/nerdctl/mod/tigron
             - github.com/urfave/cli/v3
             - github.com/hajimehoshi/oto/v2
@@ -286,7 +286,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/farcloser)
+        - prefix(github.com/mycophonic)
         - localmodule
       no-inline-comments: true
       no-prefix-comments: true

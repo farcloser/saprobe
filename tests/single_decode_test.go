@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/farcloser/saprobe"
-	"github.com/farcloser/saprobe/alac"
-	"github.com/farcloser/saprobe/detect"
-	"github.com/farcloser/saprobe/flac"
-	"github.com/farcloser/saprobe/mp3"
-	"github.com/farcloser/saprobe/vorbis"
+	"github.com/mycophonic/saprobe"
+	"github.com/mycophonic/saprobe/alac"
+	"github.com/mycophonic/saprobe/detect"
+	"github.com/mycophonic/saprobe/flac"
+	"github.com/mycophonic/saprobe/mp3"
+	"github.com/mycophonic/saprobe/vorbis"
 )
 
 //nolint:gochecknoglobals

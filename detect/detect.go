@@ -19,6 +19,8 @@ const (
 	MP3
 	// Vorbis is Ogg Vorbis.
 	Vorbis
+	// WAV is RIFF WAVE (PCM).
+	WAV
 )
 
 // String returns the human-readable name of the codec.
@@ -34,6 +36,8 @@ func (c Codec) String() string {
 		return "MP3"
 	case Vorbis:
 		return "Vorbis"
+	case WAV:
+		return "WAV"
 	}
 
 	return "unknown"
@@ -44,8 +48,9 @@ func (c Codec) String() string {
 // ALAC: 4 bytes at offset 4 ("ftyp" in an M4A/MP4 container).
 // MP3:  3 bytes at offset 0 ("ID3") or 2-byte MPEG sync word (0xFF 0xE0 mask).
 // OGG:  4 bytes at offset 0 ("OggS").
+// WAV:  "RIFF" at offset 0 and "WAVE" at offset 8 (12 bytes total).
 const (
-	headerSize = 8
+	headerSize = 12
 
 	// mpegSyncByte is the first byte of an MPEG audio frame sync word.
 	mpegSyncByte = 0xFF
@@ -64,6 +69,11 @@ func Identify(reader io.ReadSeeker) (Codec, error) {
 
 	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return Unknown, fmt.Errorf("seeking to start: %w", err)
+	}
+
+	// WAV: "RIFF" at offset 0 and "WAVE" at offset 8.
+	if string(header[:4]) == "RIFF" && string(header[8:12]) == "WAVE" {
+		return WAV, nil
 	}
 
 	// FLAC: first four bytes are "fLaC".

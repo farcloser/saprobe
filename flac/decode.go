@@ -1,34 +1,48 @@
 package flac
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	goflac "github.com/mewkiz/flac"
 	"github.com/mewkiz/flac/frame"
 
-	"github.com/farcloser/saprobe"
+	"github.com/mycophonic/primordium/fault"
+
+	"github.com/mycophonic/saprobe"
 )
 
-var errBitDepth = errors.New("unsupported bit depth")
+//nolint:gochecknoglobals
+var flacBitDepths = []saprobe.BitDepth{
+	saprobe.Depth4,
+	saprobe.Depth8,
+	saprobe.Depth12,
+	saprobe.Depth16,
+	saprobe.Depth20,
+	saprobe.Depth24,
+	saprobe.Depth32,
+}
+
+// ErrBitDepth is returned when a FLAC stream has an unsupported bit depth.
+var ErrBitDepth = errors.New("unsupported bit depth")
 
 // Decode reads a FLAC stream and decodes it to interleaved little-endian signed PCM bytes.
 // Native bit depth is preserved (16-bit FLAC produces s16le, 24-bit produces s24le, etc.).
 func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 	stream, err := goflac.New(rs)
 	if err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("opening flac: %w", err)
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 	}
 	defer stream.Close()
 
 	info := stream.Info
 	nChannels := int(info.NChannels)
 
-	bitDepth, err := saprobe.ToBitDepth(info.BitsPerSample)
-	if err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("%w: %w", errBitDepth, err)
+	bitDepth := saprobe.BitDepth(info.BitsPerSample)
+	if !slices.Contains(flacBitDepths, bitDepth) {
+		return nil, saprobe.PCMFormat{}, ErrBitDepth
 	}
 
 	bytesPerSample := bitDepth.BytesPerSample()
@@ -41,12 +55,15 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 
 	// Pre-allocate output buffer when total sample count is known.
 	var buf []byte
-	if info.NSamples > 0 {
-		//nolint:gosec // NSamples (uint64) fits in int for any real audio file.
-		buf = make([]byte, 0, int(info.NSamples)*nChannels*bytesPerSample)
+
+	var offset int
+
+	knownSize := info.NSamples > 0
+	if knownSize {
+		buf = make([]byte, int(info.NSamples)*nChannels*bytesPerSample)
 	}
 
-	// Scratch buffer for one interleaved frame (reused across iterations).
+	// Scratch buffer for one interleaved frame (reused when total size is unknown).
 	var scratch []byte
 
 	for {
@@ -56,20 +73,27 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 		}
 
 		if parseErr != nil {
-			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding frame: %w", parseErr)
+			return nil, saprobe.PCMFormat{}, fmt.Errorf("%w: %w", fault.ErrReadFailure, parseErr)
 		}
 
 		blockSize := int(audioFrame.BlockSize)
 		frameBytes := blockSize * nChannels * bytesPerSample
 
-		if cap(scratch) < frameBytes {
-			scratch = make([]byte, frameBytes)
+		if knownSize {
+			// Write directly into the pre-allocated output buffer.
+			interleave(buf[offset:offset+frameBytes], audioFrame.Subframes, blockSize, nChannels, bitDepth)
+			offset += frameBytes
 		} else {
-			scratch = scratch[:frameBytes]
-		}
+			// Unknown total size: use scratch buffer and append.
+			if cap(scratch) < frameBytes {
+				scratch = make([]byte, frameBytes)
+			} else {
+				scratch = scratch[:frameBytes]
+			}
 
-		interleave(scratch, audioFrame.Subframes, blockSize, nChannels, bitDepth)
-		buf = append(buf, scratch...)
+			interleave(scratch, audioFrame.Subframes, blockSize, nChannels, bitDepth)
+			buf = append(buf, scratch...) //nolint:makezero // Only reached when knownSize is false (buf is nil).
+		}
 	}
 
 	return buf, format, nil
@@ -80,24 +104,41 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 	pos := 0
 
 	switch depth {
-	case saprobe.Depth8:
+	case saprobe.Depth4, saprobe.Depth8:
+		// 4-bit sign-extended to 8-bit, 8-bit native. Both stored as 1 byte.
 		for i := range blockSize {
 			for ch := range nChannels {
 				dst[pos] = byte(int8(subframes[ch].Samples[i])) //nolint:gosec // Intentional int32-to-int8 truncation.
 				pos++
 			}
 		}
-	case saprobe.Depth16:
-		for i := range blockSize {
-			for ch := range nChannels {
-				binary.LittleEndian.PutUint16(
-					dst[pos:],
-					uint16(int16(subframes[ch].Samples[i])), //nolint:gosec // Intentional int32-to-int16 truncation.
-				)
-				pos += 2
+	case saprobe.Depth12, saprobe.Depth16:
+		// 12-bit sign-extended to 16-bit, 16-bit native. Both stored as 2 bytes LE.
+		if nChannels == 2 {
+			left := subframes[0].Samples
+			right := subframes[1].Samples
+
+			for i := range blockSize {
+				l := left[i]
+				r := right[i]
+				dst[pos] = byte(l)
+				dst[pos+1] = byte(l >> 8)
+				dst[pos+2] = byte(r)
+				dst[pos+3] = byte(r >> 8)
+				pos += 4
+			}
+		} else {
+			for i := range blockSize {
+				for ch := range nChannels {
+					s := subframes[ch].Samples[i]
+					dst[pos] = byte(s)
+					dst[pos+1] = byte(s >> 8)
+					pos += 2
+				}
 			}
 		}
-	case saprobe.Depth24:
+	case saprobe.Depth20, saprobe.Depth24:
+		// 20-bit sign-extended to 24-bit, 24-bit native. Both stored as 3 bytes LE.
 		for i := range blockSize {
 			for ch := range nChannels {
 				s := subframes[ch].Samples[i]
@@ -110,15 +151,14 @@ func interleave(dst []byte, subframes []*frame.Subframe, blockSize, nChannels in
 	case saprobe.Depth32:
 		for i := range blockSize {
 			for ch := range nChannels {
-				binary.LittleEndian.PutUint32(
-					dst[pos:],
-					uint32(subframes[ch].Samples[i]), //nolint:gosec // int32-to-uint32 reinterpretation.
-				)
+				s := subframes[ch].Samples[i]
+				dst[pos] = byte(s)
+				dst[pos+1] = byte(s >> 8)
+				dst[pos+2] = byte(s >> 16)
+				dst[pos+3] = byte(s >> 24)
 				pos += 4
 			}
 		}
-	case saprobe.Depth20:
-		fallthrough
 	default:
 		panic(fmt.Sprintf("flac: interleave called with unsupported bit depth %d", depth))
 	}

@@ -3,7 +3,7 @@ package alac
 import (
 	"fmt"
 
-	"github.com/farcloser/saprobe"
+	"github.com/mycophonic/saprobe"
 )
 
 // Element type tags from the ALAC bitstream.
