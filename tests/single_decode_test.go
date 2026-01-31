@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe"
 	"github.com/mycophonic/saprobe/alac"
 	"github.com/mycophonic/saprobe/detect"
@@ -113,8 +115,13 @@ type fileProperties struct {
 func probeFileProperties(t *testing.T, path string) fileProperties {
 	t.Helper()
 
+	ffprobeBin, err := agar.LookFor("ffprobe")
+	if err != nil {
+		t.Fatalf("ffprobe not found: %v", err)
+	}
+
 	// Get codec, sample rate, channels, bit depth
-	out, err := exec.Command("ffprobe",
+	out, err := exec.Command(ffprobeBin,
 		"-v", "quiet",
 		"-select_streams", "a:0",
 		"-show_entries", "stream=codec_name,sample_rate,channels,bits_per_raw_sample,duration",
@@ -180,7 +187,12 @@ func bytesPerSampleFromFormat(pcmFormat string) int {
 func decodeWithFFmpeg(t *testing.T, path, pcmFormat string) []byte {
 	t.Helper()
 
-	cmd := exec.Command("ffmpeg",
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		t.Fatalf("ffmpeg not found: %v", err)
+	}
+
+	cmd := exec.Command(ffmpegBin,
 		"-i", path,
 		"-f", pcmFormat,
 		"-v", "quiet",

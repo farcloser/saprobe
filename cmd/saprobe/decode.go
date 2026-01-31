@@ -10,6 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/mycophonic/saprobe"
+	"github.com/mycophonic/saprobe/aac"
 	"github.com/mycophonic/saprobe/alac"
 	"github.com/mycophonic/saprobe/detect"
 	"github.com/mycophonic/saprobe/flac"
@@ -85,6 +86,8 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 		return decodeAndOutput(cmd, "ALAC", file, alac.Decode)
 	case detect.WAV:
 		return decodeAndOutput(cmd, "WAV", file, wav.Decode)
+	case detect.AAC:
+		return decodeAndOutput(cmd, "AAC", file, aac.Decode)
 	case detect.Unknown:
 		return fmt.Errorf("%s: %w", path, errUnsupportedFormat)
 	}

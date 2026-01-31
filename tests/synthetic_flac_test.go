@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe"
 	"github.com/mycophonic/saprobe/flac"
 )
@@ -123,7 +125,7 @@ func ffmpegMultichannelFails(bitDepth, channels int) bool {
 func TestFLACDecode(t *testing.T) {
 	t.Parallel()
 
-	flacBin, flacBinErr := exec.LookPath("flac")
+	flacBin, flacBinErr := agar.LookFor("flac")
 
 	for _, bitDepth := range allFlacBitDepths {
 		encoders := encodersForBitDepth(bitDepth)
@@ -373,6 +375,11 @@ func flacBinaryDecodeRaw(flacBin, srcPath string) ([]byte, error) {
 // flacFFmpegEncode encodes raw PCM to FLAC using ffmpeg.
 // Only supports 16-bit (s16) and 24-bit (s32 container).
 func flacFFmpegEncode(srcPath, dstPath string, bitDepth, sampleRate, channels int) error {
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		return fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
 	inputFmt := rawPCMFormat(bitDepth)
 
 	var sampleFmt string
@@ -386,7 +393,7 @@ func flacFFmpegEncode(srcPath, dstPath string, bitDepth, sampleRate, channels in
 		return fmt.Errorf("ffmpeg FLAC encoder does not support %d-bit", bitDepth)
 	}
 
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.Command(ffmpegBin,
 		"-y",
 		"-f", inputFmt,
 		"-ar", fmt.Sprintf("%d", sampleRate),
@@ -407,10 +414,15 @@ func flacFFmpegEncode(srcPath, dstPath string, bitDepth, sampleRate, channels in
 
 // flacFFmpegDecodeRaw decodes a FLAC file to raw PCM using ffmpeg.
 func flacFFmpegDecodeRaw(srcPath string, bitDepth, channels int) ([]byte, error) {
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
 	outFmt := rawPCMFormat(bitDepth)
 	codec := rawPCMCodec(bitDepth)
 
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.Command(ffmpegBin,
 		"-i", srcPath,
 		"-f", outFmt,
 		"-ac", fmt.Sprintf("%d", channels),

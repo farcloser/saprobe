@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe"
 	"github.com/mycophonic/saprobe/wav"
 )
@@ -91,6 +93,11 @@ func TestWAVRoundTrip(t *testing.T) {
 
 // ffmpegDecodeWAV decodes a WAV file to raw PCM using ffmpeg.
 func ffmpegDecodeWAV(wavPath string, bitDepth, channels int) ([]byte, error) {
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
 	sampleFmt := "s16le"
 
 	switch bitDepth {
@@ -100,7 +107,7 @@ func ffmpegDecodeWAV(wavPath string, bitDepth, channels int) ([]byte, error) {
 		sampleFmt = "s32le"
 	}
 
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.Command(ffmpegBin,
 		"-i", wavPath,
 		"-f", sampleFmt,
 		"-ac", fmt.Sprintf("%d", channels),

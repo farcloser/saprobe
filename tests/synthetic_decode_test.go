@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe"
 	"github.com/mycophonic/saprobe/alac"
 	"github.com/mycophonic/saprobe/mp3"
@@ -421,6 +423,11 @@ func generateWhiteNoise(sampleRate, bitDepth, channels, durationSec int) []byte 
 
 // ffmpegEncode encodes raw PCM to the target format.
 func ffmpegEncode(srcPath, dstPath string, cfg codecConfig) error {
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		return fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
 	sampleFmt := "s16le"
 
 	switch cfg.bitDepth {
@@ -442,7 +449,7 @@ func ffmpegEncode(srcPath, dstPath string, cfg codecConfig) error {
 	args = append(args, cfg.ffmpegArgs...)
 	args = append(args, dstPath)
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(ffmpegBin, args...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -454,6 +461,11 @@ func ffmpegEncode(srcPath, dstPath string, cfg codecConfig) error {
 
 // ffmpegDecode decodes an audio file to raw PCM using ffmpeg.
 func ffmpegDecode(srcPath string, bitDepth, outputChannels int) ([]byte, error) {
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
 	sampleFmt := "s16le"
 
 	switch bitDepth {
@@ -465,7 +477,7 @@ func ffmpegDecode(srcPath string, bitDepth, outputChannels int) ([]byte, error) 
 	default:
 	}
 
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.Command(ffmpegBin,
 		"-i", srcPath,
 		"-f", sampleFmt,
 		"-ac", fmt.Sprintf("%d", outputChannels),

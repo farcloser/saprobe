@@ -18,6 +18,8 @@ import (
 	"github.com/containerd/nerdctl/mod/tigron/test"
 	"github.com/containerd/nerdctl/mod/tigron/tig"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe/tests/testutils"
 )
 
@@ -71,8 +73,14 @@ func makeDecodeTest(af audioFile, index, total int) *test.Case {
 		Setup: func(data test.Data, helpers test.Helpers) {
 			helpers.T().Log(fmt.Sprintf("%s decoding reference with ffmpeg (%s): %s", prefix, af.pcmFormat, af.path))
 
+			ffmpegBin, err := agar.LookFor("ffmpeg")
+			if err != nil {
+				helpers.T().Log(fmt.Sprintf("ffmpeg not found: %v", err))
+				helpers.T().FailNow()
+			}
+
 			refOut := data.Temp().Path("ref.raw")
-			helpers.Custom("ffmpeg",
+			helpers.Custom(ffmpegBin,
 				"-i", af.path,
 				"-f", af.pcmFormat,
 				"-y", refOut,
@@ -157,7 +165,12 @@ func discoverAudioFiles(t *testing.T, root string) []audioFile {
 func probeAudioFile(t *testing.T, path string) (audioFile, bool) {
 	t.Helper()
 
-	out, err := exec.Command("ffprobe",
+	ffprobeBin, lookErr := agar.LookFor("ffprobe")
+	if lookErr != nil {
+		t.Fatalf("ffprobe not found: %v", lookErr)
+	}
+
+	out, err := exec.Command(ffprobeBin,
 		"-v", "quiet",
 		"-select_streams", "a",
 		"-show_entries", "stream=codec_name,bits_per_raw_sample,sample_rate,channels",

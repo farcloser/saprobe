@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mycophonic/agar/pkg/agar"
+
 	"github.com/mycophonic/saprobe"
 	"github.com/mycophonic/saprobe/flac"
 )
@@ -53,7 +55,7 @@ func TestFLACBenchmarkEncode(t *testing.T) {
 		t.Skip("skipping benchmark in short mode")
 	}
 
-	flacBin, flacBinErr := exec.LookPath("flac")
+	flacBin, flacBinErr := agar.LookFor("flac")
 	if flacBinErr != nil {
 		t.Skip("flac binary not found")
 	}
@@ -95,7 +97,7 @@ func TestFLACBenchmarkDecode(t *testing.T) {
 		t.Skip("skipping benchmark in short mode")
 	}
 
-	flacBin, flacBinErr := exec.LookPath("flac")
+	flacBin, flacBinErr := agar.LookFor("flac")
 	if flacBinErr != nil {
 		t.Skip("flac binary not found")
 	}
@@ -220,6 +222,11 @@ func benchEncodeFlacBin(t *testing.T, bf benchFormat, flacBin, srcPath, dstPath 
 func benchEncodeFFmpeg(t *testing.T, bf benchFormat, srcPath, dstPath string) benchResult {
 	t.Helper()
 
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		t.Fatalf("ffmpeg not found: %v", err)
+	}
+
 	inputFmt := rawPCMFormat(bf.BitDepth)
 
 	var sampleFmt string
@@ -238,7 +245,7 @@ func benchEncodeFFmpeg(t *testing.T, bf benchFormat, srcPath, dstPath string) be
 	for iter := range benchIterations {
 		start := time.Now()
 
-		cmd := exec.Command("ffmpeg",
+		cmd := exec.Command(ffmpegBin,
 			"-y", "-hide_banner", "-loglevel", "error",
 			"-f", inputFmt,
 			"-ar", fmt.Sprintf("%d", bf.SampleRate),
@@ -319,6 +326,11 @@ func benchDecodeFlacBin(t *testing.T, bf benchFormat, flacBin, srcPath string) b
 func benchDecodeFFmpeg(t *testing.T, bf benchFormat, srcPath string) benchResult {
 	t.Helper()
 
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		t.Fatalf("ffmpeg not found: %v", err)
+	}
+
 	outFmt := rawPCMFormat(bf.BitDepth)
 	codec := rawPCMCodec(bf.BitDepth)
 
@@ -327,7 +339,7 @@ func benchDecodeFFmpeg(t *testing.T, bf benchFormat, srcPath string) benchResult
 	for iter := range benchIterations {
 		start := time.Now()
 
-		cmd := exec.Command("ffmpeg",
+		cmd := exec.Command(ffmpegBin,
 			"-hide_banner", "-loglevel", "error",
 			"-i", srcPath,
 			"-f", outFmt,
@@ -440,7 +452,7 @@ func TestFLACBenchmarkDecodeFile(t *testing.T) {
 
 	t.Logf("File: %s (%.1f MB)", filePath, float64(len(encoded))/(1024*1024))
 
-	flacBin, flacBinErr := exec.LookPath("flac")
+	flacBin, flacBinErr := agar.LookFor("flac")
 
 	var results []benchResult
 
